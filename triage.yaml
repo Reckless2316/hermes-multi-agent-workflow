@@ -1,63 +1,101 @@
 # ===========================================================================
-# triage.yaml — the ONE file that defines your pipeline.
+# triage.yaml — automated trading desk.
 #
-# The engine in engine/ is generic. THIS file is your domain. To adapt the
-# template to your work, you (and your agent) edit this file and the markdown
-# templates it points at — not the Python.
+# The engine in engine/ is generic. THIS file is the domain: two scouts
+# (options signals + swing setups) feed a Hermes Kanban board; items that
+# clear the rubric are researched, routed, paused at ONE human gate, then
+# paper-executed. Live money is out of scope until a human rewrites the rails.
 #
-# The values below are a COMPLETE WORKED EXAMPLE: a pipeline that finds pain
-# points AI-agent users hit, then either builds a fix or makes an explainer
-# video. Read it as a reference, then replace it with your domain.
+# Ideas and types are pulled from the sibling model-trader repo:
+#   SetupStatus TAKE / WAIT / SKIP / NO_SETUP
+#   pass/fail gates (not confluence scoring)
+#   paper-trader filters (duplicate setup, invalidated level)
+#   detectors: FVG, swings, CISD, SMT, displacement, failure swings
+# See docs/08-trading-domain.md.
 #
 # After editing, validate:  python -m cli.triage validate
 # Full key-by-key docs:     docs/03-config-reference.md
 # How to adapt, step by step: docs/04-adapting-to-your-domain.md
 # ===========================================================================
 
-# A short slug for this pipeline. Used in logs and (optionally) the board name.
-name: ai-agent-pain-points
+# Pipeline slug — used in logs.
+name: automated-trading
 
-# The dedicated Hermes Kanban board this pipeline runs on. Keep it isolated from
-# `default` so triage cards don't mix with your other work.
-# Resolves to ~/.hermes/kanban/boards/<board>/kanban.db (or ~/.hermes/kanban.db
-# when board: default).
-board: pain-point
+# Dedicated Hermes Kanban board. Isolated from `default` so desk cards never
+# mix with unrelated work. Resolves to
+# ~/.hermes/kanban/boards/<board>/kanban.db
+board: trading
 
-# Where per-item persistent workspaces and the item vault live (relative to repo
-# root, or absolute). Post-gate stages share <workspace_root>/<subdir>/<slug>/.
+# Per-item persistent workspaces + the item vault (relative to repo root).
+# Post-gate stages share <workspace_root>/<subdir>/<slug>/.
 workspace_root: ./work
 
 # Soft per-item LLM-spend budget (USD). Over budget BEFORE the gate → pause +
-# notify; over budget AFTER approval → notify + continue. See scripts/cost_report.py.
-cost_gate_usd: 5
+# notify; over budget AFTER approval → notify + continue.
+cost_gate_usd: 8
 
 # --------------------------------------------------------------------------- #
-# SOURCES — the scouts. Each is a Hermes profile running a scout skill on a cron.
-# The profile binds the model (e.g. one scout on Grok, the rest on GPT). The
-# `query` is the domain prompt that tells the scout what to look for.
-# Crons are registered in the GATEWAY profile's store (see docs/07-runbook.md).
+# SOURCES — the scouts. Two desks, two profiles, staggered crons.
+# Scout profiles MUST list `kanban` in toolsets (they run via cron, not the
+# dispatcher). Crons are registered in the GATEWAY profile's store.
 # --------------------------------------------------------------------------- #
 sources:
-  - id: x
-    profile: xresearch
-    skill: triage-scout-x
-    schedule: "15 * * * *"        # hourly at :15
+  - id: options
+    profile: options_scout
+    skill: triage-scout-options
+    schedule: "10,40 13-20 * * 1-5"   # twice an hour during US cash (UTC)
     query: |
-      Search X for people describing concrete, recent pain using AI coding
-      agents — wasted hours, gave up, broken workflows. Quote them. Skip vague
-      hype. Each find: a one-line claim, source URLs, why it may matter.
-  - id: web
-    profile: webresearch
-    skill: triage-scout-web
-    schedule: "45 * * * *"        # hourly at :45 (staggered from X)
+      Scout liquid US equities and ETFs for DEFINED-RISK options setups only.
+      Look for unusual options activity (volume >> open interest, sweeps,
+      blocks), IV-rank extremes, and event-driven structures (earnings,
+      FOMC, product launches) that can be expressed as a debit/credit
+      spread, iron condor, or calendar — never naked short premium.
+
+      Each candidate must name: underlying, direction (or neutral), expiry,
+      strikes, structure, debit/credit, max loss, estimated R, IV rank,
+      catalyst, and why the underlying confirms (or why a non-directional
+      structure is justified). Quote the flow or IV snapshot.
+
+      Skip: lottery 0DTE calls with no structure, "guaranteed" screenshots,
+      setups with undefined risk, illiquid strikes, or claims you cannot
+      trace to a primary source (flow print, chain snapshot, or filing).
+
+      Map every find to a model-trader SetupStatus: TAKE (actionable now),
+      WAIT (structure forming — missing confirmation), or do not report
+      SKIP / NO_SETUP noise. Quality over quantity; zero candidates is fine.
+
+  - id: swing
+    profile: swing_scout
+    skill: triage-scout-swing
+    schedule: "25 * * * *"            # hourly, 24/7 (crypto perps + global)
     query: |
-      Search Reddit, YouTube, and the web for AI-agent users describing concrete
-      friction or confusion. Prefer threads with multiple corroborating voices.
+      Scout liquid crypto perps (Hyperliquid-style: BTC, ETH, majors) and
+      liquid equity/ETF names for SWING setups using pass/fail gates, not
+      confluence scores. Prefer model-trader detectors in this order:
+
+        1. DATA_OK — enough HTF/LTF candles to judge structure
+        2. HTF_BIAS — 1h/4h failure swing or clear draw on liquidity
+        3. LTF_FVG — 5m/15m fair-value gap aligned with HTF bias
+        4. CISD_CONFIRM — change-in-state-of-delivery / breaker, or WAIT
+        5. LEVELS — entry, invalidation stop, target (at least 1R)
+
+      Also note SMT divergence vs a correlated pair and displacement when
+      they are actually present — never as bonus points. "If it's not dumb
+      obvious, don't take it."
+
+      Report TAKE and WAIT only. Every TAKE must set entry, stop, target,
+      direction, gates_passed, and a specific reason. WAIT means one named
+      event is still missing (e.g. CISD candle not printed). Do not report
+      SKIP / NO_SETUP.
+
+      Skip: same entry/stop/target you already filed this session (duplicate
+      setup), and levels that just got stopped (invalidated level) unless
+      price has structurally moved away.
 
 # --------------------------------------------------------------------------- #
-# ITEM SCHEMA — the structured fields a scout emits per candidate. These feed
-# dedup, scoring, and routing. `title`, `claim`, `sources` are required by the
-# engine; the rest are domain fields your rubric/router consume.
+# ITEM SCHEMA — structured fields a scout emits per candidate. `title`,
+# `claim`, `sources` are required by the engine; the rest feed the rubric
+# and router. Keep in sync with the scout report format.
 # --------------------------------------------------------------------------- #
 item_schema:
   fields:
@@ -65,13 +103,24 @@ item_schema:
     - claim
     - sources
     - why_it_may_matter
-    - agent_solvable_or_explainable
-    - solution_gap
-    - strategic_fit
+    - symbol
+    - style                 # options | swing
+    - direction             # long | short | neutral
+    - setup_status          # TAKE | WAIT
+    - timeframe
+    - entry
+    - stop
+    - target
+    - gates_passed
+    - reason
+    - structure             # e.g. put-debit-spread, bullish-FVG-retrace
+    - max_loss
+    - risk_r                # planned R-multiple
+    - catalyst
 
 # --------------------------------------------------------------------------- #
-# DEDUP — don't research the same thing twice. token-cosine is the dependency-
-# free default; switch to "embedding" once you populate item embeddings.
+# DEDUP — same symbol + same thesis should not be re-researched. token-cosine
+# is the dependency-free default. Title/claim should include symbol + levels.
 # --------------------------------------------------------------------------- #
 dedup:
   method: token-cosine
@@ -79,100 +128,101 @@ dedup:
   possible_threshold: 0.40        # >= this → possible dup (flag, continue)
 
 # --------------------------------------------------------------------------- #
-# RUBRIC — how an item is judged. The orchestrator scores each dimension 0..max
-# (LLM mode), the engine sums and compares to threshold. Edit dimensions/weights
-# freely; LLM mode adapts automatically. (The deterministic heuristic scorer
-# only understands the reference keys — see engine/scoring.py.)
+# RUBRIC — is this setup worth spending research on? This is NOT a confluence
+# score for taking the trade (model-trader gates remain pass/fail). It is the
+# bar for "bother a researcher / eventually the human."
 # --------------------------------------------------------------------------- #
 rubric:
-  threshold: 65                   # advance if total >= this (max here is 100)
+  threshold: 70                   # advance if total >= this (max 100)
   dimensions:
-    - {key: frequency,                     max: 25, hint: "how many independent sources / how often it recurs"}
-    - {key: intensity,                     max: 20, hint: "how acute — wasted hours, gave up, blocked"}
-    - {key: agent_solvable_or_explainable, max: 25, hint: "can an agent build a fix OR clearly explain it"}
-    - {key: solution_gap,                  max: 15, hint: "is there no good existing solution"}
-    - {key: strategic_fit,                 max: 15, hint: "fit to your domain/audience"}
+    - {key: setup_clarity,     max: 25, hint: "is the setup dumb-obvious — named gates, not vibes; WAIT is allowed if the missing event is named"}
+    - {key: risk_reward,       max: 20, hint: "defined max loss; planned R >= 1; options structures must cap risk"}
+    - {key: gate_completeness, max: 25, hint: "HTF bias + LTF trigger + entry/stop/target (swing) OR structure + IV/flow + catalyst + max loss (options)"}
+    - {key: market_context,    max: 15, hint: "HTF aligned, not news-chop; correlation/SMT considered when relevant"}
+    - {key: uniqueness,        max: 15, hint: "not a duplicate of a recent fill; not a recently blown / invalidated level"}
 
 # --------------------------------------------------------------------------- #
-# RESEARCH LANES — parallel investigation before routing. All lanes must finish
-# before the route step fires (fan-in). The classifier_lane emits the value the
-# router reads.
+# RESEARCH LANES — parallel investigation before routing. All must finish
+# before route fires. The classifier_lane emits the routing signal.
+# Lane briefs: docs/08-trading-domain.md
 # --------------------------------------------------------------------------- #
 research_lanes:
-  role: researcher                # which role runs the lanes (mapped via roles:)
+  role: researcher
   lanes:
-    - verify_sources              # is the pain real, attributable, not one rant?
-    - prior_context               # what's already known / related history?
-    - existing_solutions_audit    # what already solves this? → emits the classifier
-  classifier_lane: existing_solutions_audit
+    - verify_setup            # data quality, detectors/gates, levels actually exist
+    - market_context          # HTF, correlations, IV/events, news
+    - risk_audit              # duplicate + invalidated-level filters, sizing → classifier
+  classifier_lane: risk_audit
 
 # --------------------------------------------------------------------------- #
-# ROUTE — map the classifier's value to a path. Every value on the right MUST be
-# a key under `paths:` below. Edit this map to change routing logic — no code.
+# ROUTE — risk_audit.disposition → path. Values mirror model-trader
+# SetupStatus, split by desk (options vs swing).
 # --------------------------------------------------------------------------- #
 route:
-  classifier: existing_solutions_audit.solution_quality
+  classifier: risk_audit.disposition
   map:
-    missing: build
-    broken: build
-    confusing: video
-    poorly_documented: video
-    outdated: video
-    good: shelve
+    options_take: options
+    swing_take: swing
+    wait: watch
+    skip: shelve
+    no_edge: shelve
 
 # --------------------------------------------------------------------------- #
-# PATHS — what happens per route outcome. Each path has:
-#   prep:    stages BEFORE the human gate (research synthesis, proposal drafting)
-#   propose: who drafts + sends the proposal, and which template
-#   fulfill: stages AFTER approval (run in a shared persistent workspace)
-#   scope_rails / deliverable_spec: md files inlined into worker task bodies
-#   auto: true → terminal path with no work (e.g. shelve)
-# Roles (analyst, builder, …) are mapped to profiles under `roles:`.
+# PATHS — what happens per route outcome. Fulfillment is PAPER ONLY.
+# Roles map to Hermes profiles under `roles:`.
 # --------------------------------------------------------------------------- #
 paths:
-  build:
+  options:
     prep:
-      - {stage: synthesize_problem, role: analyst}
-      - {stage: solution_ideation,  role: analyst}
-    propose: {role: orchestrator, template: paths/proposals/build.md}
+      - {stage: synthesize_setup,        role: analyst}
+      - {stage: structure_defined_risk,  role: analyst}
+    propose: {role: orchestrator, template: paths/proposals/options.md}
     fulfill:
-      - {stage: prototype_build, role: builder}
-      - {stage: test_run,        role: tester}
-      - {stage: final_report,    role: orchestrator}
-    workspace_subdir: builds
-    scope_rails: paths/rails/build.md
+      - {stage: paper_execute,   role: options_trader}
+      - {stage: journal_report,  role: orchestrator}
+    workspace_subdir: options
+    scope_rails: paths/rails/options.md
+    deliverable_spec: paths/specs/options.md
 
-  video:
+  swing:
     prep:
-      - {stage: tutorial_research, role: video_producer}
-      - {stage: outline,           role: video_producer}
-    propose: {role: orchestrator, template: paths/proposals/video.md}
+      - {stage: synthesize_setup, role: analyst}
+      - {stage: compute_levels,   role: analyst}
+    propose: {role: orchestrator, template: paths/proposals/swing.md}
     fulfill:
-      - {stage: slides_builder,    role: video_producer}
-      - {stage: script_writer,     role: video_producer}
-      - {stage: final_deliverable, role: orchestrator}
-    workspace_subdir: videos
-    deliverable_spec: paths/specs/video.md
+      - {stage: paper_execute,   role: swing_trader}
+      - {stage: journal_report,  role: orchestrator}
+    workspace_subdir: swings
+    scope_rails: paths/rails/swing.md
+    deliverable_spec: paths/specs/swing.md
+
+  watch:
+    prep:
+      - {stage: define_trigger, role: analyst}
+    propose: {role: orchestrator, template: paths/proposals/watch.md}
+    fulfill:
+      - {stage: arm_monitor,     role: swing_trader}
+      - {stage: journal_report,  role: orchestrator}
+    workspace_subdir: watchlist
+    scope_rails: paths/rails/watch.md
+    deliverable_spec: paths/specs/watch.md
 
   shelve:
-    auto: true                    # nothing exists worth building or explaining
+    auto: true                    # skip / no_edge — do not bother the human
 
 # --------------------------------------------------------------------------- #
-# ROLES — map abstract roles (used above) to real Hermes profiles. The
-# scaffolder (cli/triage.py scaffold) can create these profiles for you.
+# ROLES — abstract role → Hermes profile. Scaffolder can create these.
 # --------------------------------------------------------------------------- #
 roles:
   orchestrator:   orchestrator
   researcher:     researcher
   analyst:        analyst
-  builder:        builder
-  tester:         tester
-  video_producer: video_producer
+  options_trader: options_trader
+  swing_trader:   swing_trader
 
 # --------------------------------------------------------------------------- #
-# GATE — the single human approval point. The orchestrator maps these reply
-# verbs to proposal_actions.py subcommands. Telegram note: replies carry NO
-# leading slash (Telegram reserves /commands).
+# GATE — the single human approval point. Never auto-approve.
+# Telegram: replies carry NO leading slash (Telegram reserves /commands).
 # --------------------------------------------------------------------------- #
 gate:
   channel: telegram

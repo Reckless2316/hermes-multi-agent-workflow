@@ -15,8 +15,8 @@ edit it.
 
 ## Assignee = routing
 
-The whole multi-agent mechanism is a name on a card. A card assigned to `builder`
-runs on the builder profile; one assigned to `video_producer` runs on that
+The whole multi-agent mechanism is a name on a card. A card assigned to `swing_trader`
+runs on the swing_trader profile; one assigned to `options_trader` runs on that
 profile. The engine maps abstract **roles** (in `triage.yaml`) to real **profiles**
 via the `roles:` block, so your config talks in roles and the board gets profiles.
 

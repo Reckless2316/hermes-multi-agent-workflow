@@ -96,19 +96,24 @@ def score_from_breakdown(breakdown: dict[str, Any], rubric: Rubric) -> ScoreResu
 # Heuristic mode (reference-domain; deterministic; test fixture)
 # --------------------------------------------------------------------------- #
 
-# These keyword lists belong to the REFERENCE domain (pain points about AI
-# agents). If you keep heuristic mode for a different domain, retune them.
+# Keyword lists for heuristic mode. Production scoring is LLM mode against
+# whatever dimensions live in triage.yaml; these rules are a deterministic
+# fallback for tests and offline passes. Update them when the rubric keys change.
 _HIGH_INTENSITY_TERMS = [
     "broken", "wasted hours", "gave up", "can't", "cannot", "failed", "blocked", "pain",
 ]
+_KNOWN_HEURISTIC_DIMS = {
+    "frequency", "intensity", "agent_solvable_or_explainable", "solution_gap", "strategic_fit",
+    "setup_clarity", "risk_reward", "gate_completeness", "market_context", "uniqueness",
+}
 
 
 def score_candidate_heuristic(candidate: dict[str, Any], rubric: Rubric) -> ScoreResult:
-    """Deterministic scorer keyed to the reference rubric dimensions.
+    """Deterministic scorer keyed to known rubric dimensions.
 
     Reads each dimension's `max` from the rubric so the proportions stay correct
-    even if you rescale, but the SCORING LOGIC assumes the reference dimension
-    keys. Unknown dimensions score 0 and are noted.
+    even if you rescale. Unknown dimensions score 0 and are noted — use LLM mode
+    or add a rule here.
     """
     notes: list[str] = []
     maxes = {d.key: d.max for d in rubric.dimensions}
@@ -119,6 +124,17 @@ def score_candidate_heuristic(candidate: dict[str, Any], rubric: Rubric) -> Scor
             return 0
         return int(round(maxes[key] * max(0.0, min(1.0, fraction))))
 
+    text = " ".join(str(candidate.get(k, "")) for k in ("claim", "why_it_may_matter", "title", "reason")).lower()
+    fields = candidate.get("fields") if isinstance(candidate.get("fields"), dict) else {}
+    merged = {**fields, **{k: v for k, v in candidate.items() if k != "fields"}}
+
+    def g(*keys: str, default: str = "") -> str:
+        for k in keys:
+            v = merged.get(k)
+            if v not in (None, ""):
+                return str(v)
+        return default
+
     # frequency — by distinct source count (4+ saturates)
     if "frequency" in maxes:
         n = len(candidate.get("sources") or [])
@@ -126,7 +142,6 @@ def score_candidate_heuristic(candidate: dict[str, Any], rubric: Rubric) -> Scor
 
     # intensity — by strong-language hits in the candidate text
     if "intensity" in maxes:
-        text = " ".join(str(candidate.get(k, "")) for k in ("claim", "why_it_may_matter", "title")).lower()
         hits = sum(1 for t in _HIGH_INTENSITY_TERMS if t in text)
         breakdown["intensity"] = scaled("intensity", 0.25 + 0.25 * hits)
 
@@ -148,9 +163,62 @@ def score_candidate_heuristic(candidate: dict[str, Any], rubric: Rubric) -> Scor
         frac = 1.0 if v in {"yes", "true"} or "agent" in v else 0.0 if v in {"no", "false", "off"} else 0.47
         breakdown["strategic_fit"] = scaled("strategic_fit", frac)
 
-    unknown = set(maxes) - {
-        "frequency", "intensity", "agent_solvable_or_explainable", "solution_gap", "strategic_fit",
-    }
+    gates_raw = g("gates_passed", "gates")
+    gates = [p.strip() for p in gates_raw.replace(";", ",").split(",") if p.strip()]
+    status = g("setup_status", "status").upper()
+    style = g("style").lower()
+
+    if "setup_clarity" in maxes:
+        frac = 0.35
+        if status == "TAKE":
+            frac = 0.7
+        if status == "WAIT" and ("wait:" in text or "missing" in text):
+            frac = 0.55
+        if "dumb obvious" in text or len(gates) >= 4:
+            frac = min(1.0, frac + 0.3)
+        if "vibe" in text or "confluence" in text:
+            frac = min(frac, 0.4)
+        breakdown["setup_clarity"] = scaled("setup_clarity", frac)
+
+    if "risk_reward" in maxes:
+        frac = 0.3
+        risk_r = g("risk_r", "r")
+        try:
+            r_val = float(risk_r)
+            frac = 1.0 if r_val >= 2 else 0.75 if r_val >= 1 else 0.25
+        except (TypeError, ValueError):
+            if any(tok in text for tok in ("1r", "2r", "defined-risk", "defined risk", "max loss")):
+                frac = 0.7
+        if style == "options" and ("naked" in text or "undefined" in text):
+            frac = 0.0
+        breakdown["risk_reward"] = scaled("risk_reward", frac)
+
+    if "gate_completeness" in maxes:
+        needed = ("entry", "stop", "target")
+        have = sum(1 for k in needed if g(k))
+        frac = have / 3
+        if len(gates) >= 3:
+            frac = min(1.0, frac + 0.35)
+        if style == "options" and g("structure") and g("max_loss"):
+            frac = min(1.0, frac + 0.35)
+        breakdown["gate_completeness"] = scaled("gate_completeness", frac)
+
+    if "market_context" in maxes:
+        frac = 0.4
+        ctx = g("catalyst", "timeframe", "market_context").lower()
+        if any(tok in (text + " " + ctx) for tok in ("htf", "aligned", "smt")):
+            frac = 0.75
+        if any(tok in text for tok in ("chop", "news", "fomc surprise")):
+            frac = 0.25
+        breakdown["market_context"] = scaled("market_context", frac)
+
+    if "uniqueness" in maxes:
+        frac = 0.8
+        if any(tok in text for tok in ("duplicate", "invalidated", "blown level")):
+            frac = 0.15
+        breakdown["uniqueness"] = scaled("uniqueness", frac)
+
+    unknown = set(maxes) - _KNOWN_HEURISTIC_DIMS
     for k in unknown:
         notes.append(f"heuristic scorer has no rule for dimension {k!r}; scored 0 — use LLM mode or add a rule.")
 
