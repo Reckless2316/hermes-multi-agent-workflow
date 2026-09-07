@@ -5,6 +5,11 @@ needs a Hermes install with profiles, auth, and scouts. This is the setup
 sequence. `python -m cli.triage scaffold` prints these commands tailored to your
 `triage.yaml`.
 
+The live config is the **automated trading** desk (`board: trading`). Domain
+notes, model-trader wiring, and paper-only rails: `docs/08-trading-domain.md`.
+Scout profiles are `options_scout` and `swing_scout` — both need the `kanban`
+toolset (step 4).
+
 > Commands assume the `hermes` CLI and your per-profile wrappers are on PATH. On
 > WSL, run them in your Linux shell (Hermes runs in WSL, even if the repo lives on
 > a Windows drive).

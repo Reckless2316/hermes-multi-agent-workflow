@@ -12,6 +12,8 @@ auth.json
 work/
 vault/
 intake/
+trades.json
+*.jsonl
 
 # ── Python ──
 __pycache__/

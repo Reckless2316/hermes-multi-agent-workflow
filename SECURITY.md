@@ -2,8 +2,9 @@
 
 ## Read this before running
 
-The Hermes Multi-Agent Workflow runs **LLM-authored code** (on any "build" path),
-**shells out**, and acts **autonomously** between detection and the human gate.
+The Hermes Multi-Agent Workflow can **shell out**, run **LLM-authored code** on
+build-style paths, and act **autonomously** between detection and the human gate.
+The trading desk's rails additionally **forbid live orders** (paper journal only).
 It is a powerful, dual-use automation tool. Understand the trust surface in
 [`docs/06-security.md`](docs/06-security.md) before deploying it.
 

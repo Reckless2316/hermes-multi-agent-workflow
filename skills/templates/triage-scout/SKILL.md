@@ -13,13 +13,13 @@ metadata:
 # Triage scout
 
 > **For the adapting agent:** this is a TEMPLATE. Make one copy per `sources[]`
-> entry in `triage.yaml` (e.g. `triage-scout-x`, `triage-scout-web`), give each
-> the matching `name`, and paste that source's `query` into "What to look for".
-> Install each copy on the profile named in that source. See
-> `docs/04-adapting-to-your-domain.md` and `docs/05-pipeline-stages.md`.
+> entry in `triage.yaml`, give each the matching `name`, and paste that source's
+> `query` into "What to look for". Install each copy on the profile named in
+> that source. See `docs/04-adapting-to-your-domain.md`.
 >
-> **Want a worked example?** `examples/ai-agent-pain-points/reference-skills/pain-point-scout-x/SKILL.md`
-> is a real, filled-in copy of this template from the live system.
+> **This desk's filled-in scouts:** `skills/templates/triage-scout-options/` and
+> `triage-scout-swing/`. Historical example:
+> `examples/ai-agent-pain-points/reference-skills/pain-point-scout-x/SKILL.md`.
 
 ## When to use
 
@@ -80,8 +80,10 @@ Why it may matter: <one line>
 ...
 ```
 
-If you change these fields, update `item_schema` in `triage.yaml` AND
-`engine/intake_parser.py` to match.
+Extra `Key: value` lines on a candidate (Symbol, Direction, Entry, …) are
+captured automatically in `Candidate.fields` (keys snake_cased). Keep
+`item_schema` in `triage.yaml` in sync with what scouts emit. `title`,
+`claim`, and `sources` remain required.
 
 ## Don't
 

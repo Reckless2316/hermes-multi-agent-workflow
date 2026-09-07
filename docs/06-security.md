@@ -22,7 +22,7 @@ your adapted version.
 
 The single most important security control here is the per-path rails file. Good
 rails enumerate *acceptable* targets and an explicit *never* list (see the
-shipped `paths/rails/build.md`). When a proposal doesn't fit, the rule is
+shipped `paths/rails/options.md` / `paths/rails/swing.md`). When a proposal doesn't fit, the rule is
 **shelve or re-route — never widen the rails to fit.**
 
 ## Secrets: what must NEVER be committed

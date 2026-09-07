@@ -1,10 +1,14 @@
-# Example: ai-agent-pain-points (the reference instance)
+# Example: ai-agent-pain-points (historical reference)
 
-This is the worked example the template ships configured for, and the system it
-was extracted from. **The live copy is the repo-root `triage.yaml`** — read that
-file top to bottom; it is heavily annotated and is the canonical reference for
-every config block. For a full architectural write-up of the origin system, see
-**`REFERENCE.md`** in this folder.
+This is the origin system the template was extracted from. Root `triage.yaml` is
+now the **automated-trading** desk (`examples/automated-trading/`,
+`docs/08-trading-domain.md`). This folder keeps the pain-point snapshot:
+
+- `triage.yaml` — the original config
+- `paths/` — original rails / specs / proposals
+- `reference-skills/` — the real X scout
+
+For a full architectural write-up of the origin system, see **`REFERENCE.md`**.
 
 ## What it does
 
@@ -30,7 +34,7 @@ gets filled in for a real source — the search query, the report format, and th
 
 ## Use it as a starting point
 
-Copy the root `triage.yaml`, then follow `docs/04-adapting-to-your-domain.md` to
+Copy `examples/ai-agent-pain-points/triage.yaml`, then follow `docs/04-adapting-to-your-domain.md` to
 repoint it. The structure (sources → rubric → research → route → paths → gate)
 stays the same; you swap the content.
 

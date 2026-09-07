@@ -7,29 +7,37 @@ A reusable skeleton for an **autonomous, multi-agent triage pipeline** built on
 **one human approval gate**, then **fulfills and delivers** — all coordinated on a
 single Hermes Kanban board.
 
-It ships pre-wired as a worked example (find pain points AI-agent users hit →
-build a fix or make an explainer video), so you can read a complete pipeline and
-then repoint it at your own domain.
+Root `triage.yaml` is wired as an **automated trading desk**: an options-signal
+scout and a swing-trade scout feed board `trading`; setups that clear the rubric
+are researched, routed to paper options / paper swing / watch / shelve, and
+paper-executed only after one Telegram approve. Ideas, detectors, paper-trader
+filters, and the TAKE/WAIT/SKIP vocabulary come from the sibling
+[model-trader](https://github.com/Reckless2316/model-trader) repo
+(`docs/08-trading-domain.md`).
 
-> **This is a template, not a turnkey app.** It runs its unit tests and validates
-> its config out of the box, but going live requires setting up your Hermes
-> install, profiles, auth, and scouts (see `docs/07-runbook.md`). The point is to
-> give you — and your coding agent — a clear, working structure to adapt.
+The previous AI-agent pain-point example is snapshotted under
+`examples/ai-agent-pain-points/`.
+
+> **This is a template, not a turnkey broker.** It runs its unit tests and
+> validates its config out of the box, but going live requires your Hermes
+> install, profiles, auth, and scouts (`docs/07-runbook.md`). Scope rails forbid
+> live money; fulfillment writes a paper journal.
 
 ## The idea
 
 ```
-sources → intake → dedup → score → research (parallel) → route
-                                                            │
-              ┌──────────────────────┬──────────────────────┤
-            path A                 path B                  shelve
-           (prep)                 (prep)                  (auto)
-              └──────────┬───────────┘
-                   ── HUMAN GATE ──   approve · shelve · modify
-              ┌──────────┴───────────┐
-            fulfill                fulfill
-              └──────────┬───────────┘
-                      deliver
+options scout ─┐
+               ├→ intake → dedup → score → research (parallel) → route
+swing scout  ─┘                                              │
+                              ┌──────────────┬───────────────┼──────────┐
+                           options        swing           watch      shelve
+                           (prep)        (prep)          (prep)      (auto)
+                              └──────────────┴───────────────┘
+                                       ── HUMAN GATE ──
+                              ┌──────────────┴───────────────┐
+                         paper fill                     arm monitor
+                              └──────────────┬───────────────┘
+                                          deliver
 ```
 
 The shape is fixed; **what flows through it is yours.** Everything domain-specific
@@ -39,9 +47,17 @@ lives in one file, `triage.yaml`.
 
 ```bash
 pip install -r requirements.txt          # just PyYAML
-python -m cli.triage validate            # check the example config
-python -m unittest discover -s tests     # 12 tests, all generic
+python -m cli.triage validate            # check the trading-desk config
+python -m unittest discover -s tests
 python -m cli.triage scaffold            # print the Hermes setup plan
+# then:  hermes kanban boards create trading
+```
+
+If the sibling **model-trader** repo is checked out next to this one:
+
+```bash
+pip install -e ../model-trader
+export MODEL_TRADER_ROOT=../model-trader
 ```
 
 ## Adapt it to your domain
@@ -62,24 +78,15 @@ at. Hand your coding agent **`AGENTS.md`** and ask it to walk you through
 triage.yaml              THE config — your whole pipeline (start here)
 AGENTS.md                Guide for the AI agent adapting this template
 engine/                  Generic engine (rarely edited)
-  config.py              Loads + validates triage.yaml
-  engine.py              TriageEngine — all deterministic step logic
-  scoring.py             Rubric scoring (LLM mode + deterministic mode)
-  routing.py             Classification → path
-  dedup.py               Similarity (token-cosine; embedding-ready)
-  item_vault.py          One markdown file per tracked item
-  kanban_store.py        Writes the Hermes Kanban board
-  intake_parser.py       Parses scout reports
-  frontmatter.py         Stdlib YAML-frontmatter for item files
-proposal_actions.py      Human-gate handler (approve/shelve/modify) — config-driven
-paths/                   Per-path templates you customize
-  rails/   specs/   proposals/
-skills/templates/        Scout + orchestrator SKILL.md templates
+proposal_actions.py      Human-gate handler (approve/shelve/modify)
+paths/                   Per-path templates (rails, specs, proposals, philosophy)
+skills/templates/        Scout + orchestrator SKILL.md
+  triage-scout-options/  Filled-in options scout
+  triage-scout-swing/    Filled-in swing scout
 cli/triage.py            validate / scaffold / init / install
-scripts/cost_report.py   Per-item spend for the cost gate
-tests/                   Generic engine tests
-docs/                    Deep-dive docs (architecture, board, config, adapting, …)
-examples/                Reference configs
+tests/                   Generic engine tests + trading-domain cases
+docs/                    Deep-dive docs (08 = this desk + model-trader map)
+examples/                Historical pain-point snapshot + trading README
 ```
 
 ## Documentation
@@ -91,14 +98,16 @@ examples/                Reference configs
 - `docs/05-pipeline-stages.md` — each stage, and the gotchas to preserve.
 - `docs/06-security.md` — trust surface, scope rails, safe publishing.
 - `docs/07-runbook.md` — profiles, board, crons, go-live.
-- `examples/ai-agent-pain-points/REFERENCE.md` — full write-up of the reference
-  implementation this template was extracted from.
+- `docs/08-trading-domain.md` — this desk, mapped onto model-trader.
+- `examples/ai-agent-pain-points/REFERENCE.md` — write-up of the origin system.
 
 ## Security
 
-This template runs LLM-authored code and shells out, behind one human gate. Read
-**`SECURITY.md`** and `docs/06-security.md` before deploying — and run the
-pre-publish secret-scan checklist before open-sourcing an adapted copy.
+This template can shell out and, on a build-style path, run LLM-authored code,
+behind one human gate. The trading desk's rails additionally **forbid live
+orders**. Read **`SECURITY.md`** and `docs/06-security.md` before deploying —
+and run the pre-publish secret-scan checklist before open-sourcing an adapted
+copy.
 
 ## Contributing
 
@@ -108,8 +117,3 @@ domains go in `triage.yaml`, not the code.
 ## License
 
 MIT — see `LICENSE`.
-
-## Credits
-
-Extracted and generalized from a working single-machine Hermes pipeline. The
-engine is domain-agnostic; the bundled example reflects its origin.

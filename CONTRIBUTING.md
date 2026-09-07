@@ -24,7 +24,7 @@ valuable.
 
 ```bash
 pip install -r requirements.txt
-python -m unittest discover -s tests     # 12 tests
+python -m unittest discover -s tests     # generic engine + trading-domain cases
 python -m cli.triage validate
 ```
 

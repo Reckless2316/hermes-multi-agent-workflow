@@ -97,3 +97,9 @@ Think of it as filling in blanks in one sentence:
 > I approve."
 
 Every bolded blank is a `triage.yaml` value. Nothing there is code.
+
+The current desk fills in as: watch **options flow + swing structure** for
+**setups**; keep ≥ **70** on **clarity / R / gates / context / uniqueness**;
+after **verify_setup / market_context / risk_audit**, if **disposition** is
+**options_take / swing_take / wait / skip**, do **paper options / paper swing /
+watch / shelve**. See `docs/08-trading-domain.md`.

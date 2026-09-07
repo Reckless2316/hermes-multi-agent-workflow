@@ -11,10 +11,12 @@ The **Hermes Multi-Agent Workflow**: a reusable skeleton for an autonomous, mult
 > **researches** in parallel → **routes** to one of several paths → stops at **one
 > human gate** → **fulfills** → **delivers**.
 
-It is a **template, not a finished product.** Out of the box it is wired as a
-worked example (finding pain points about AI agents, then building a fix or making
-an explainer video). The human who cloned this wants to repoint it at *their*
-domain. Your job is to help them do that.
+It is a **template**. Root `triage.yaml` is currently wired as an **automated
+trading desk** (options-signal scout + swing-trade scout → paper execution after
+one human gate). The previous pain-point example is snapshotted under
+`examples/ai-agent-pain-points/`. To repoint the desk, edit `triage.yaml` and the
+markdown it points at — see `docs/04-adapting-to-your-domain.md` and
+`docs/08-trading-domain.md`.
 
 ## The single most important rule
 
