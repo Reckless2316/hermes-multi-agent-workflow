@@ -1,108 +1,132 @@
 # AGENTS.md — read this first
 
-**You are an AI coding agent helping a human adapt this template to their own
-work.** This file is your map. Read it fully before you touch anything.
+You are a coding agent working on the Reckless fork of **Hermes Multi-Agent
+Workflow**. Preserve the generic triage framework while extending the trading
+desk as explicit, testable mechanisms.
 
 ## What this repository is
 
-The **Hermes Multi-Agent Workflow**: a reusable skeleton for an autonomous, multi-agent triage pipeline that
+The Hermes workflow is a reusable pipeline:
 
-> **detects** items from sources → **dedups** → **scores** them against a rubric →
-> **researches** in parallel → **routes** to one of several paths → stops at **one
-> human gate** → **fulfills** → **delivers**.
+> detect → dedup → score → research in parallel → route → one human gate → fulfill → deliver
 
-It is a **template**. Root `triage.yaml` is currently wired as an **automated
-trading desk** (options-signal scout + swing-trade scout → paper execution after
-one human gate). The previous pain-point example is snapshotted under
-`examples/ai-agent-pain-points/`. To repoint the desk, edit `triage.yaml` and the
-markdown it points at — see `docs/04-adapting-to-your-domain.md` and
-`docs/08-trading-domain.md`.
+Root `triage.yaml` is currently an automated trading desk. The **swing** path
+continues to borrow detectors/gate ideas from `tonbistudio/model-trader`. The
+**options** path now has its own deterministic Tradier-backed mechanism under
+`trading/` because multileg options require different data, pricing, risk, and
+paper-ledger semantics than a single-price stop/target trader.
 
-## The single most important rule
+## Core template rule
 
-**The domain lives in `triage.yaml`, not in the Python.** The `engine/` package
-is generic and should stay that way. When the human says "make this about X,"
-your default move is to **edit `triage.yaml`** and the markdown templates it
-points at — *not* to edit `engine/`.
+The generic triage engine stays generic.
 
-You touch `engine/` only to add a new **mechanism** (a new kind of step, a new
-scoring mode, an embedding backend). You never edit it to encode a **topic**.
+- `engine/` = generic workflow mechanisms. Edit rarely.
+- `triage.yaml` = routing/domain workflow.
+- `paths/` = path rails, proposal format, deliverable contracts.
+- `skills/templates/` = agent operating instructions.
+- `strategy/` = deterministic trading parameters.
+- `trading/` = reusable trading mechanisms/data/risk/ledger code.
 
-If you find yourself writing the human's subject matter into a `.py` file, stop —
-that belongs in config.
+A new trading mechanism may belong in `trading/`; trading subject matter does
+not belong in `engine/`.
 
-## Orientation: what's generic vs. what's theirs
+## Trading desk invariants
 
-| Generic engine (rarely edit) | The human's domain (edit freely) |
-|---|---|
-| `engine/config.py` — loads/validates triage.yaml | `triage.yaml` — the whole pipeline definition |
-| `engine/engine.py` — deterministic step logic | `paths/rails/*.md` — what may be built |
-| `engine/scoring.py` — applies the rubric | `paths/specs/*.md` — output formats |
-| `engine/routing.py` — applies the route map | `paths/proposals/*.md` — gate messages |
-| `engine/dedup.py` — similarity | `skills/templates/*/SKILL.md` — scout + orchestrator behavior |
-| `engine/item_vault.py`, `kanban_store.py`, `frontmatter.py`, `intake_parser.py` | env: profiles, models, board name, schedules |
-| `proposal_actions.py` — gate handler (config-driven) | |
+These are architecture constraints, not suggestions:
 
-## Architecture in one paragraph
+1. **LLMs analyze; deterministic code authorizes.** Agents may research events,
+   explain, rank context, or veto. They may not invent/hand-edit strikes, market
+   prices, Greeks, IV Rank, max loss, buying-power math, contract count, or a
+   hard-gate result.
+2. Options market/account reads use the read-only `TradierClient`. Do not add
+   order POST methods to that class. A future live executor must be a separate
+   adapter with separate review and tests.
+3. Tradier current IV/Greeks are not historical IV Rank. Missing IVR stays
+   missing. Never infer it with an LLM.
+4. Entry economics use conservative **natural credit** (`short bid - hedge ask`).
+   Midpoint is reference/mark data only.
+5. `model-trader.PaperTrader` must not size multileg options. It uses one
+   entry/stop distance; options risk is defined by leg structure. Use
+   `OptionsPaperLedger` for options.
+6. Post-approval execution must re-fetch the exact OCC legs and re-run hard
+   gates. Ranking changes alone do not invalidate an approved structure.
+7. Human-approved natural credit is the paper limit. If fresh natural credit is
+   worse, do not chase; return to WAIT/reproposal. If better, the paper ledger
+   still fills at the approved limit for conservative accounting while recording
+   the fresh quote snapshot.
+8. Run one Tradier market stream service. Share latest state through SQLite WAL
+   (`work/market_state.db`). Redis is not required for V1.
+9. Strategy parameters live in `strategy/*.yaml`; routing stays in
+   `triage.yaml`; secrets and runtime state never enter Git.
+10. Paper execution remains behind the existing human gate. Never auto-approve.
 
-**Fat engine, thin skill.** Everything deterministic (dedup, scoring math, route
-resolution, building the research fan-out and the post-gate task chains, choosing
-workspaces) is Python in `engine/engine.py::TriageEngine`. The orchestrator
-*skill* is reduced to the few steps needing a model's judgment (proposing rubric
-scores, classifying research, writing proposal prose). This keeps the moving
-parts testable. Read `docs/01-architecture.md`.
+## Current options strategy boundary
 
-## How to help the human adapt it (the standard flow)
+`strategy/tasty_defined_risk_v1.yaml` currently supports only:
 
-Follow `docs/04-adapting-to-your-domain.md`. In short:
+- short put verticals;
+- short call verticals;
+- iron condors.
 
-1. **Interview the human** for: their domain, what their scouts should watch, the
-   rubric that decides "worth doing," the route decision, and what each path
-   should *produce*.
-2. **Rewrite `triage.yaml`** to match — sources, item_schema, rubric, research
-   lanes, route map, paths, roles.
-3. **Rewrite the markdown templates** under `paths/` (rails, specs, proposals) and
-   the scout `query` + orchestrator notes in `skills/templates/`.
-4. **Validate:** `python -m cli.triage validate` until it's clean.
-5. **Keep tests green:** `python -m unittest discover -s tests`. Add domain cases.
-6. **Scaffold:** `python -m cli.triage scaffold` prints the Hermes setup plan
-   (profiles, skills, board, crons). Walk the human through it; see
-   `docs/07-runbook.md`.
+It is a paper-only, defined-risk premium-selling baseline. Do not silently add
+naked premium, ratio spreads with undefined risk, 0DTE lottery structures, or
+live execution.
 
-## Hard-won gotchas baked into this template (do not regress)
+The ranking objective is capital efficiency first, then actual premium dollars,
+then width as a tie-breaker. Do not replace this with headline POP ranking.
 
-These cost real debugging in the system this was extracted from. Preserve them:
+## Human/LLM boundary
 
-- **Scout profiles need the `kanban` toolset.** Scouts run via cron (not the
-  dispatcher), so kanban tools aren't auto-enabled. Without it the scout writes a
-  report but silently can't create the intake task.
-- **Post-gate stages must use a persistent `dir` workspace, not scratch.** Scratch
-  dirs are wiped between tasks, stranding the final delivery step. `engine.py`
-  already does this for `fulfill` chains — don't change it to scratch.
-- **Setting status ≠ delivering.** The orchestrator is a headless worker; it must
-  actually run `hermes send --to telegram` to reach the human. Status fields
-  don't notify anyone.
-- **Telegram reserves `/commands`.** Gate replies carry NO leading slash
-  (`approve <slug>`, not `/approve`).
-- **First task in a post-gate chain must be `ready` (no blocking parent).** A
-  child of the still-open triage task would sit in `todo` forever.
+Mechanical scanner output is immutable market/risk evidence downstream.
+Hermes research lanes may add:
 
-`docs/05-pipeline-stages.md` explains each in context.
+- earnings/material company events;
+- FOMC/CPI/macro context;
+- broader market/sector regime;
+- portfolio concentration/correlation observations;
+- contextual veto / WAIT / SKIP reasoning.
 
-## Safety / publishing (the human cares about this)
+They may not recalculate the spread from prose.
 
-This template runs LLM-authored code (the build path) and shells out, behind one
-human gate. The **scope rails** (`paths/rails/*.md`) are the safety boundary —
-keep them tight. Before the human publishes their adapted version, do a security
-pass and make sure **no secrets ship**: never commit `.env`, `auth.json`, board
-`*.db`, or the `work/`/vault contents. The `.gitignore` covers these — verify it.
-Read `docs/06-security.md`.
+## Existing Hermes gotchas — preserve them
 
-## Don't
+- Cron scouts need the `kanban` toolset because dispatcher auto-enablement does
+  not apply to them.
+- Post-gate stages need persistent `dir` workspaces, not scratch directories.
+- Setting task status is not delivery; headless workers must actually send the
+  outbound message.
+- Telegram gate replies have no leading slash (`approve <slug>`).
+- The first task in a post-gate chain must be ready and not blocked by the still
+  open triage parent.
+- Never commit `.env`, auth files, Kanban databases, `work/`, vaults, ledgers, or
+  account/market snapshots containing private runtime data.
 
-- Don't bake the domain into `engine/`.
-- Don't remove the human gate or make it auto-approve.
-- Don't loosen the scope rails to fit an idea — shelve or re-route instead.
-- Don't commit secrets or real data.
-- Don't assume this runs as-is. It's a skeleton; the human's environment (Hermes
-  install, profiles, auth, web-search keys) must be set up — see the runbook.
+## Required validation before changing trading mechanisms
+
+Run:
+
+```bash
+python -m cli.triage validate
+python -m unittest discover -s tests
+python -m compileall -q engine trading scripts tests
+```
+
+For changes under `trading/`, add a deterministic unit test before loosening a
+rule. Never tune a gate solely to make a small backtest look better.
+
+## Reading order for this fork
+
+1. `docs/08-trading-domain.md`
+2. `docs/09-tasty-defined-risk-v1.md`
+3. `docs/10-tradier-data-and-state.md`
+4. `docs/11-v1-roadmap.md`
+5. `docs/12-v1-architecture-decisions.md`
+6. `docs/13-tradier-paper-runbook.md`
+7. upstream/general `docs/01-07`
+
+When a future decision changes one of these invariants, update the relevant doc,
+test, and config in the same change. The repository—not conversational memory—is
+the durable source of truth.
+
+### Options occurrence dedup
+Do not use the generic lifetime semantic dedup as the final authority for options. Run `scripts/check_options_occurrence.py` for in-flight candidate IDs. The scanner and execution path separately reject exact structures already open in the paper ledger or Tradier account. This allows a closed historical structure to become a legitimate new occurrence later.

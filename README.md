@@ -1,118 +1,146 @@
-# Hermes Multi-Agent Workflow
+# Hermes Multi-Agent Trading Workflow
 
-A reusable skeleton for an **autonomous, multi-agent triage pipeline** built on
-[Hermes](https://github.com/NousResearch/hermes-agent): a fleet of agents that
-**detects** items from sources, **dedups** them, **scores** them against a rubric,
-**researches** them in parallel, **routes** each to a fulfillment path, pauses at
-**one human approval gate**, then **fulfills and delivers** — all coordinated on a
-single Hermes Kanban board.
+A reusable Hermes multi-agent triage framework, currently adapted into a
+**rule-driven trading desk**.
 
-Root `triage.yaml` is wired as an **automated trading desk**: an options-signal
-scout and a swing-trade scout feed board `trading`; setups that clear the rubric
-are researched, routed to paper options / paper swing / watch / shelve, and
-paper-executed only after one Telegram approve. Ideas, detectors, paper-trader
-filters, and the TAKE/WAIT/SKIP vocabulary come from the sibling
-[model-trader](https://github.com/Reckless2316/model-trader) repo
-(`docs/08-trading-domain.md`).
+The generic workflow still follows Tonbi Studio's original shape:
 
-The previous AI-agent pain-point example is snapshotted under
-`examples/ai-agent-pain-points/`.
+> detect → dedup → score → parallel research → route → one human approval gate → fulfill → deliver
 
-> **This is a template, not a turnkey broker.** It runs its unit tests and
-> validates its config out of the box, but going live requires your Hermes
-> install, profiles, auth, and scouts (`docs/07-runbook.md`). Scope rails forbid
-> live money; fulfillment writes a paper journal.
+This fork adds a deterministic options mechanism around an active Tradier
+brokerage data connection while preserving the swing-trading concepts borrowed
+from [tonbistudio/model-trader](https://github.com/tonbistudio/model-trader).
 
-## The idea
+## Trading architecture
 
+```text
+                     MARKET / ACCOUNT DATA
+                             Tradier
+                                │
+              ┌─────────────────┴────────────────┐
+              ▼                                  ▼
+      deterministic options              swing detectors
+        scanner + sizing                 / model-trader ideas
+              │                                  │
+              └──────────────┬───────────────────┘
+                             ▼
+                        Hermes intake
+                             ▼
+                    dedup + triage score
+                             ▼
+       mechanical_verify | market_context | portfolio_risk
+                             ▼
+                      TAKE / WAIT / SKIP
+                             ▼
+                       HUMAN APPROVAL
+                             ▼
+                 exact-leg fresh revalidation
+                             ▼
+                  paper ledger / monitoring
 ```
-options scout ─┐
-               ├→ intake → dedup → score → research (parallel) → route
-swing scout  ─┘                                              │
-                              ┌──────────────┬───────────────┼──────────┐
-                           options        swing           watch      shelve
-                           (prep)        (prep)          (prep)      (auto)
-                              └──────────────┴───────────────┘
-                                       ── HUMAN GATE ──
-                              ┌──────────────┴───────────────┐
-                         paper fill                     arm monitor
-                              └──────────────┬───────────────┘
-                                          deliver
-```
 
-The shape is fixed; **what flows through it is yours.** Everything domain-specific
-lives in one file, `triage.yaml`.
+**Core invariant:** LLMs analyze; deterministic code authorizes. Hermes can
+research earnings/macro context, explain, or veto a mechanically valid setup. It
+cannot invent or hand-edit option prices, strikes, Greeks, max loss, BPR, size,
+or hard-gate results.
+
+## Options V1
+
+`strategy/tasty_defined_risk_v1.yaml` is a paper-only defined-risk
+premium-selling baseline built around the user's stated tasty-style priorities:
+capital efficiency, small risk, many occurrences, wider defined-risk structures
+when they earn their buying power, and early winner management.
+
+V1 scans only:
+
+- short put verticals;
+- short call verticals;
+- iron condors.
+
+Candidate economics use **natural executable pricing**, not optimistic midpoint
+fills. Tradier supplies current option quotes plus ORATS Greeks/IV; historical IV
+Rank is not supplied by Tradier, so the system reports it as unavailable instead
+of manufacturing it.
 
 ## Quickstart
 
 ```bash
-pip install -r requirements.txt          # just PyYAML
-python -m cli.triage validate            # check the trading-desk config
+pip install -r requirements.txt
+python -m cli.triage validate
 python -m unittest discover -s tests
-python -m cli.triage scaffold            # print the Hermes setup plan
-# then:  hermes kanban boards create trading
+python -m compileall -q engine trading scripts tests
+python -m cli.triage scaffold
 ```
 
-If the sibling **model-trader** repo is checked out next to this one:
+For the options scanner, configure local/profile environment variables from
+`.env.example`, especially `TRADIER_API_TOKEN` and `TRADIER_ACCOUNT_ID`. Never
+commit their values.
+
+One manual scan:
+
+```bash
+python scripts/scan_tradier_options.py \
+  --config strategy/tasty_defined_risk_v1.yaml \
+  --output work/manual/options-intake.md \
+  --json-output work/manual/options-scan.json
+```
+
+See `docs/13-tradier-paper-runbook.md` for the full paper workflow.
+
+## Repository layout
+
+```text
+triage.yaml                     Hermes routing/domain workflow
+AGENTS.md                       durable instructions/invariants for coding agents
+engine/                         generic multi-agent triage engine
+strategy/                       auditable deterministic trading parameters
+trading/                        Tradier/data/options/risk/paper mechanisms
+scripts/                        scanner, durable candidate handoff, stream, paper execute/manage entrypoints
+paths/                          rails, proposal formats, deliverable contracts
+skills/templates/               Hermes scout/orchestrator operating instructions
+tests/                          generic + trading mechanism tests
+docs/                           architecture, runbooks, strategy provenance
+examples/                       historical template examples
+```
+
+## Documentation
+
+- `docs/01-architecture.md` — generic fat-engine/thin-skill architecture.
+- `docs/04-adapting-to-your-domain.md` — upstream adaptation method.
+- `docs/06-security.md` — trust surface and secrets.
+- `docs/07-runbook.md` — generic Hermes setup.
+- `docs/08-trading-domain.md` — current desk mapping.
+- `docs/09-tasty-defined-risk-v1.md` — strategy contract and mechanical math.
+- `docs/10-tradier-data-and-state.md` — provider/state architecture.
+- `docs/11-v1-roadmap.md` — current project state and graduation path.
+- `docs/12-v1-architecture-decisions.md` — durable ADR-style decisions.
+- `docs/13-tradier-paper-runbook.md` — local integration and paper operation.
+
+## model-trader relationship
+
+Do not merge the two projects into one blob. `model-trader` remains a useful
+sibling/reference for swing detectors, pass/fail gate design, and its original
+single-price paper-trading concepts. Multileg options deliberately use this
+repo's options-specific risk and ledger mechanisms because spread risk is not
+entry-to-stop distance.
+
+If needed locally:
 
 ```bash
 pip install -e ../model-trader
 export MODEL_TRADER_ROOT=../model-trader
 ```
 
-## Adapt it to your domain
+## Safety / execution boundary
 
-The whole adaptation is editing `triage.yaml` + the markdown templates it points
-at. Hand your coding agent **`AGENTS.md`** and ask it to walk you through
-`docs/04-adapting-to-your-domain.md`. In brief:
+V1 contains **no live order-submission adapter**. The Tradier client is read-only
+apart from creating a market-data streaming session. Production credentials are
+used for real-time market/account reads; fills are simulated in the paper ledger
+after the existing human gate.
 
-1. Edit `triage.yaml`: sources, rubric, research lanes, route map, paths, roles.
-2. Edit `paths/` templates (scope rails, deliverable specs, proposal formats).
-3. Edit `skills/templates/` (scout queries + orchestrator notes).
-4. `python -m cli.triage validate`, keep `tests/` green.
-5. Follow `docs/07-runbook.md` to set up profiles and go live.
-
-## Repository layout
-
-```
-triage.yaml              THE config — your whole pipeline (start here)
-AGENTS.md                Guide for the AI agent adapting this template
-engine/                  Generic engine (rarely edited)
-proposal_actions.py      Human-gate handler (approve/shelve/modify)
-paths/                   Per-path templates (rails, specs, proposals, philosophy)
-skills/templates/        Scout + orchestrator SKILL.md
-  triage-scout-options/  Filled-in options scout
-  triage-scout-swing/    Filled-in swing scout
-cli/triage.py            validate / scaffold / init / install
-tests/                   Generic engine tests + trading-domain cases
-docs/                    Deep-dive docs (08 = this desk + model-trader map)
-examples/                Historical pain-point snapshot + trading README
-```
-
-## Documentation
-
-- `docs/01-architecture.md` — fat engine / thin skill; how the pieces fit.
-- `docs/02-the-board.md` — Kanban as the bus; dispatcher; fan-in.
-- `docs/03-config-reference.md` — every `triage.yaml` key.
-- `docs/04-adapting-to-your-domain.md` — the step-by-step adaptation guide.
-- `docs/05-pipeline-stages.md` — each stage, and the gotchas to preserve.
-- `docs/06-security.md` — trust surface, scope rails, safe publishing.
-- `docs/07-runbook.md` — profiles, board, crons, go-live.
-- `docs/08-trading-domain.md` — this desk, mapped onto model-trader.
-- `examples/ai-agent-pain-points/REFERENCE.md` — write-up of the origin system.
-
-## Security
-
-This template can shell out and, on a build-style path, run LLM-authored code,
-behind one human gate. The trading desk's rails additionally **forbid live
-orders**. Read **`SECURITY.md`** and `docs/06-security.md` before deploying —
-and run the pre-publish secret-scan checklist before open-sourcing an adapted
-copy.
-
-## Contributing
-
-See **`CONTRIBUTING.md`**. The golden rule: keep `engine/` domain-agnostic; new
-domains go in `triage.yaml`, not the code.
+A future live executor is a separate phase with broker preview, limit-order
+state, reconciliation, idempotency, stale-data controls, and portfolio/daily
+kill switches. It is not enabled by toggling `PAPER_TRADING`.
 
 ## License
 

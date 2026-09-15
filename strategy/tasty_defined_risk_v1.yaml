@@ -1,0 +1,36 @@
+name: tasty_defined_risk_v1
+version: 1
+mode: paper
+allowed_strategies: [short_put_vertical, short_call_vertical, iron_condor]
+universe:
+  symbols: [SPY, QQQ, IWM]
+entry:
+  dte_min: 25
+  dte_target: 45
+  dte_max: 50
+  short_delta: {target: 0.30, minimum: 0.20, maximum: 0.35}
+  liquidity:
+    min_open_interest: 100
+    min_volume: 10
+    max_bid_ask_pct_mid: 0.20
+    require_two_sided_market: true
+  credit:
+    minimum_credit_to_width: 0.30
+    target_credit_to_width: 0.50
+  width:
+    minimum: 2.5
+    maximum: 20
+    preferred: [5, 10, 15, 20]
+    tolerance: 0.51
+  max_candidates_per_side: 5
+management:
+  credit_vertical_profit_target_pct: 0.50
+  iron_condor_profit_target_pct: 0.50
+  manage_at_dte: 21
+  close_partial_winner_at_manage_dte: true
+  force_close_at_dte: 1
+risk:
+  risk_per_trade_pct: 0.01
+  max_contracts_per_trade: 10
+  max_total_defined_risk_pct: null
+  max_correlated_defined_risk_pct: null
