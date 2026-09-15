@@ -1,231 +1,79 @@
-# ===========================================================================
-# triage.yaml — automated trading desk.
-#
-# The engine in engine/ is generic. THIS file is the domain: two scouts
-# (options signals + swing setups) feed a Hermes Kanban board; items that
-# clear the rubric are researched, routed, paused at ONE human gate, then
-# paper-executed. Live money is out of scope until a human rewrites the rails.
-#
-# Ideas and types are pulled from the sibling model-trader repo:
-#   SetupStatus TAKE / WAIT / SKIP / NO_SETUP
-#   pass/fail gates (not confluence scoring)
-#   paper-trader filters (duplicate setup, invalidated level)
-#   detectors: FVG, swings, CISD, SMT, displacement, failure swings
-# See docs/08-trading-domain.md.
-#
-# After editing, validate:  python -m cli.triage validate
-# Full key-by-key docs:     docs/03-config-reference.md
-# How to adapt, step by step: docs/04-adapting-to-your-domain.md
-# ===========================================================================
-
-# Pipeline slug — used in logs.
 name: automated-trading
-
-# Dedicated Hermes Kanban board. Isolated from `default` so desk cards never
-# mix with unrelated work. Resolves to
-# ~/.hermes/kanban/boards/<board>/kanban.db
 board: trading
-
-# Per-item persistent workspaces + the item vault (relative to repo root).
-# Post-gate stages share <workspace_root>/<subdir>/<slug>/.
 workspace_root: ./work
-
-# Soft per-item LLM-spend budget (USD). Over budget BEFORE the gate → pause +
-# notify; over budget AFTER approval → notify + continue.
 cost_gate_usd: 8
-
-# --------------------------------------------------------------------------- #
-# SOURCES — the scouts. Two desks, two profiles, staggered crons.
-# Scout profiles MUST list `kanban` in toolsets (they run via cron, not the
-# dispatcher). Crons are registered in the GATEWAY profile's store.
-# --------------------------------------------------------------------------- #
 sources:
   - id: options
     profile: options_scout
     skill: triage-scout-options
-    schedule: "10,40 13-20 * * 1-5"   # twice an hour during US cash (UTC)
+    schedule: "10,40 13-20 * * 1-5"
     query: |
-      Scout liquid US equities and ETFs for DEFINED-RISK options setups only.
-      Look for unusual options activity (volume >> open interest, sweeps,
-      blocks), IV-rank extremes, and event-driven structures (earnings,
-      FOMC, product launches) that can be expressed as a debit/credit
-      spread, iron condor, or calendar — never naked short premium.
-
-      Each candidate must name: underlying, direction (or neutral), expiry,
-      strikes, structure, debit/credit, max loss, estimated R, IV rank,
-      catalyst, and why the underlying confirms (or why a non-directional
-      structure is justified). Quote the flow or IV snapshot.
-
-      Skip: lottery 0DTE calls with no structure, "guaranteed" screenshots,
-      setups with undefined risk, illiquid strikes, or claims you cannot
-      trace to a primary source (flow print, chain snapshot, or filing).
-
-      Map every find to a model-trader SetupStatus: TAKE (actionable now),
-      WAIT (structure forming — missing confirmation), or do not report
-      SKIP / NO_SETUP noise. Quality over quantity; zero candidates is fine.
-
+      Run scripts/scan_tradier_options.py with strategy/tasty_defined_risk_v1.yaml.
+      The deterministic scanner is source of truth for strikes, prices, Greeks,
+      max loss, BPR, size, status, and exact OCC legs. Never invent IV Rank.
+      Zero candidates is valid. Market/news context is researched downstream.
   - id: swing
     profile: swing_scout
     skill: triage-scout-swing
-    schedule: "25 * * * *"            # hourly, 24/7 (crypto perps + global)
+    schedule: "25 * * * *"
     query: |
-      Scout liquid crypto perps (Hyperliquid-style: BTC, ETH, majors) and
-      liquid equity/ETF names for SWING setups using pass/fail gates, not
-      confluence scores. Prefer model-trader detectors in this order:
-
-        1. DATA_OK — enough HTF/LTF candles to judge structure
-        2. HTF_BIAS — 1h/4h failure swing or clear draw on liquidity
-        3. LTF_FVG — 5m/15m fair-value gap aligned with HTF bias
-        4. CISD_CONFIRM — change-in-state-of-delivery / breaker, or WAIT
-        5. LEVELS — entry, invalidation stop, target (at least 1R)
-
-      Also note SMT divergence vs a correlated pair and displacement when
-      they are actually present — never as bonus points. "If it's not dumb
-      obvious, don't take it."
-
-      Report TAKE and WAIT only. Every TAKE must set entry, stop, target,
-      direction, gates_passed, and a specific reason. WAIT means one named
-      event is still missing (e.g. CISD candle not printed). Do not report
-      SKIP / NO_SETUP.
-
-      Skip: same entry/stop/target you already filed this session (duplicate
-      setup), and levels that just got stopped (invalidated level) unless
-      price has structurally moved away.
-
-# --------------------------------------------------------------------------- #
-# ITEM SCHEMA — structured fields a scout emits per candidate. `title`,
-# `claim`, `sources` are required by the engine; the rest feed the rubric
-# and router. Keep in sync with the scout report format.
-# --------------------------------------------------------------------------- #
+      Scout liquid swing setups using model-trader-style pass/fail gates:
+      DATA_OK -> HTF_BIAS -> LTF_FVG -> CISD_CONFIRM -> LEVELS. Report TAKE/WAIT only.
 item_schema:
-  fields:
-    - title
-    - claim
-    - sources
-    - why_it_may_matter
-    - symbol
-    - style                 # options | swing
-    - direction             # long | short | neutral
-    - setup_status          # TAKE | WAIT
-    - timeframe
-    - entry
-    - stop
-    - target
-    - gates_passed
-    - reason
-    - structure             # e.g. put-debit-spread, bullish-FVG-retrace
-    - max_loss
-    - risk_r                # planned R-multiple
-    - catalyst
-
-# --------------------------------------------------------------------------- #
-# DEDUP — same symbol + same thesis should not be re-researched. token-cosine
-# is the dependency-free default. Title/claim should include symbol + levels.
-# --------------------------------------------------------------------------- #
-dedup:
-  method: token-cosine
-  duplicate_threshold: 0.62       # >= this → duplicate (append source, stop)
-  possible_threshold: 0.40        # >= this → possible dup (flag, continue)
-
-# --------------------------------------------------------------------------- #
-# RUBRIC — is this setup worth spending research on? This is NOT a confluence
-# score for taking the trade (model-trader gates remain pass/fail). It is the
-# bar for "bother a researcher / eventually the human."
-# --------------------------------------------------------------------------- #
+  fields: [title, claim, sources, why_it_may_matter, candidate_id, symbol, style, direction, setup_status, timeframe, entry, stop, target, gates_passed, reason, structure, expiration, strikes, width, credit, natural_credit, mid_credit_mark, max_profit, max_loss, buying_power_reduction, capital_efficiency, premium_to_bpr, short_delta, mid_iv, iv_rank, contracts, total_max_loss, total_buying_power_reduction, profit_target_pct, manage_at_dte, strategy_version, risk_r, catalyst]
+dedup: {method: token-cosine, duplicate_threshold: 0.62, possible_threshold: 0.40}
 rubric:
-  threshold: 70                   # advance if total >= this (max 100)
+  threshold: 70
   dimensions:
-    - {key: setup_clarity,     max: 25, hint: "is the setup dumb-obvious — named gates, not vibes; WAIT is allowed if the missing event is named"}
-    - {key: risk_reward,       max: 20, hint: "defined max loss; planned R >= 1; options structures must cap risk"}
-    - {key: gate_completeness, max: 25, hint: "HTF bias + LTF trigger + entry/stop/target (swing) OR structure + IV/flow + catalyst + max loss (options)"}
-    - {key: market_context,    max: 15, hint: "HTF aligned, not news-chop; correlation/SMT considered when relevant"}
-    - {key: uniqueness,        max: 15, hint: "not a duplicate of a recent fill; not a recently blown / invalidated level"}
-
-# --------------------------------------------------------------------------- #
-# RESEARCH LANES — parallel investigation before routing. All must finish
-# before route fires. The classifier_lane emits the routing signal.
-# Lane briefs: docs/08-trading-domain.md
-# --------------------------------------------------------------------------- #
+    - {key: setup_clarity, max: 25, hint: "exact deterministic gates/legs; no vibes"}
+    - {key: risk_reward, max: 20, hint: "defined max loss, verified BPR, capital efficiency and size"}
+    - {key: gate_completeness, max: 25, hint: "options: Tradier snapshot/liquidity/DTE/delta/width/credit/sizing; swing: DATA/HTF/LTF/CISD/LEVELS"}
+    - {key: market_context, max: 15, hint: "earnings, macro, material news; never fabricate IV Rank"}
+    - {key: uniqueness, max: 15, hint: "not duplicate/open or recently invalidated"}
 research_lanes:
   role: researcher
-  lanes:
-    - verify_setup            # data quality, detectors/gates, levels actually exist
-    - market_context          # HTF, correlations, IV/events, news
-    - risk_audit              # duplicate + invalidated-level filters, sizing → classifier
-  classifier_lane: risk_audit
-
-# --------------------------------------------------------------------------- #
-# ROUTE — risk_audit.disposition → path. Values mirror model-trader
-# SetupStatus, split by desk (options vs swing).
-# --------------------------------------------------------------------------- #
+  lanes: [mechanical_verify, market_context, portfolio_risk]
+  classifier_lane: portfolio_risk
 route:
-  classifier: risk_audit.disposition
-  map:
-    options_take: options
-    swing_take: swing
-    wait: watch
-    skip: shelve
-    no_edge: shelve
-
-# --------------------------------------------------------------------------- #
-# PATHS — what happens per route outcome. Fulfillment is PAPER ONLY.
-# Roles map to Hermes profiles under `roles:`.
-# --------------------------------------------------------------------------- #
+  classifier: portfolio_risk.disposition
+  map: {options_take: options, swing_take: swing, wait: watch, skip: shelve, no_edge: shelve}
 paths:
   options:
     prep:
-      - {stage: synthesize_setup,        role: analyst}
-      - {stage: structure_defined_risk,  role: analyst}
+      - {stage: revalidate_snapshot, role: analyst}
+      - {stage: prepare_paper_order, role: analyst}
     propose: {role: orchestrator, template: paths/proposals/options.md}
     fulfill:
-      - {stage: paper_execute,   role: options_trader}
-      - {stage: journal_report,  role: orchestrator}
+      - {stage: materialize_setup, role: options_trader}
+      - {stage: paper_execute, role: options_trader}
+      - {stage: journal_report, role: orchestrator}
     workspace_subdir: options
     scope_rails: paths/rails/options.md
     deliverable_spec: paths/specs/options.md
-
   swing:
     prep:
       - {stage: synthesize_setup, role: analyst}
-      - {stage: compute_levels,   role: analyst}
+      - {stage: compute_levels, role: analyst}
     propose: {role: orchestrator, template: paths/proposals/swing.md}
     fulfill:
-      - {stage: paper_execute,   role: swing_trader}
-      - {stage: journal_report,  role: orchestrator}
+      - {stage: paper_execute, role: swing_trader}
+      - {stage: journal_report, role: orchestrator}
     workspace_subdir: swings
     scope_rails: paths/rails/swing.md
     deliverable_spec: paths/specs/swing.md
-
   watch:
-    prep:
-      - {stage: define_trigger, role: analyst}
+    prep: [{stage: define_trigger, role: analyst}]
     propose: {role: orchestrator, template: paths/proposals/watch.md}
     fulfill:
-      - {stage: arm_monitor,     role: swing_trader}
-      - {stage: journal_report,  role: orchestrator}
+      - {stage: arm_monitor, role: swing_trader}
+      - {stage: journal_report, role: orchestrator}
     workspace_subdir: watchlist
     scope_rails: paths/rails/watch.md
     deliverable_spec: paths/specs/watch.md
-
-  shelve:
-    auto: true                    # skip / no_edge — do not bother the human
-
-# --------------------------------------------------------------------------- #
-# ROLES — abstract role → Hermes profile. Scaffolder can create these.
-# --------------------------------------------------------------------------- #
-roles:
-  orchestrator:   orchestrator
-  researcher:     researcher
-  analyst:        analyst
-  options_trader: options_trader
-  swing_trader:   swing_trader
-
-# --------------------------------------------------------------------------- #
-# GATE — the single human approval point. Never auto-approve.
-# Telegram: replies carry NO leading slash (Telegram reserves /commands).
-# --------------------------------------------------------------------------- #
+  shelve: {auto: true}
+roles: {orchestrator: orchestrator, researcher: researcher, analyst: analyst, options_trader: options_trader, swing_trader: swing_trader}
 gate:
   channel: telegram
   approve: [approve]
-  shelve:  [shelve, "reject the rest"]
-  modify:  [modify]
+  shelve: [shelve, "reject the rest"]
+  modify: [modify]
