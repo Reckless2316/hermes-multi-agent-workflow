@@ -7,19 +7,15 @@
 
 All files in the persistent workspace `work/options/<slug>/`:
 
-1. `setup.json` — model-trader `SetupResult.to_dict()` plus options extras:
-   `structure`, `legs[]` (expiry, strike, right, qty, side), `debit_credit`,
-   `max_loss`, `iv_rank`, `catalyst`. `status` must be `TAKE`.
-2. `trades.json` — paper journal after `paper_execute` (append-only; never
-   rewrite unrelated fills). Use the model-trader `Trade` fields.
-3. `report.md` — skimmable fill recap for Telegram: symbol, structure, max
-   loss, R, journal id, and the "am I actually taking this?" checklist
-   answers (see `paths/philosophy.md`).
+1. `setup.json` — `ScanResult.to_dict()` from `desk` (status TAKE, legs, credit,
+   max_loss, capital_efficiency, profit_target, management_dte). Do not invent
+   a different structure.
+2. `trades.json` — `desk.paper.PaperTrader` journal after `paper_execute`.
+3. `report.md` — fill recap for Telegram.
 
 ## Quality bar
 
-- Max loss is a number in account currency, not "small."
+- Max loss is a number in account currency, copied from the scanner.
 - Every leg is specified. No "around the 500c."
-- Duplicate and invalidated-level filters were run against this workspace's
-  journal (and `work/options/trades.json` if you keep a desk-wide journal).
-- No live broker calls.
+- `python -m desk.paper` is not a live broker. No Tradier order endpoints.
+- Duplicate / BP filters already ran in `desk/`; do not resize.

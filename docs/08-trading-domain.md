@@ -1,15 +1,42 @@
 # 08 — Trading domain (this desk)
 
 Root `triage.yaml` is wired as an **automated trading desk** coordinated on a
-Hermes Kanban board named `trading`. The engine is unchanged. This page is the
-map from the sibling **model-trader** repo onto that config.
+Hermes Kanban board named `trading`. The generic triage `engine/` is unchanged.
+**Options numbers come from `desk/` (`TASTY_DEFINED_RISK_V1`)**, not from an LLM.
 
-> Watch **options flow** and **swing structure** for **setups**. Keep the ones
-> that score ≥ **70** on **clarity / R / gate-completeness / context /
-> uniqueness**. After researching **verify_setup**, **market_context**, and
-> **risk_audit**, if **disposition** says **options_take / swing_take / wait /
-> skip**, do **options / swing / watch / shelve**, which produces a **paper
-> journal fill or a WAIT monitor** — but only after **one human approve**.
+> Watch **Tradier chains** (deterministic tasty scanner) and **swing structure**
+> for **setups**. Keep the ones that score ≥ **70** on **clarity / R /
+> gate-completeness / context / uniqueness**. After researching **verify_setup**,
+> **market_context**, and **risk_audit**, if **disposition** says **options_take /
+> swing_take / wait / skip**, do **options / swing / watch / shelve**, which
+> produces a **paper journal fill or a WAIT monitor** — but only after **one
+> human approve**.
+
+## LLMs analyze; deterministic code authorizes
+
+```
+TRADIER LIVE DATA → MARKET STATE → OPTIONS SCANNER → TASTY RULE ENGINE
+ → PORTFOLIO / BP → TAKE/WAIT/SKIP → HERMES DESK (veto/context)
+ → YOUR APPROVAL → PAPER FILL → 25/50% + 21-DTE MANAGER → JOURNAL
+```
+
+Hermes must not invent strikes, Greeks, buying-power, max loss, or size.
+The options scout runs `python -m desk.scan --emit-intake` and files that
+markdown verbatim.
+
+Strategy parameters (DTE 25–55 target 45, 50% profit / 25% calendars, manage
+at 21 DTE, widths $1–$20, rank by expected_realized_profit / BP — not POP)
+live in `desk/strategy.yaml`.
+
+```bash
+python -m desk.scan --replay tests/fixtures/spy_tasty.json --emit-intake
+python -m desk.scan                 # live: TRADIER_ACCESS_TOKEN
+python -m desk.manage --journal work/options/desk-trades.json --as-of 2026-10-01
+```
+
+Adapters: `desk.data.TradierAdapter` (V1) behind `MarketDataAdapter`. Later
+OPRA/NBBO/flow plug in without rewriting the rule engine. Redis is not required
+(SQLite / JSON journal).
 
 ## What was pulled from model-trader
 

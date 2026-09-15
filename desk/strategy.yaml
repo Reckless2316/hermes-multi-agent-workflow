@@ -1,0 +1,50 @@
+# TASTY_DEFINED_RISK_V1 — editable parameters. Hermes must not invent these.
+# Rank by capital efficiency (expected realized profit / buying-power), not POP.
+
+strategy:
+  name: tasty_defined_risk_v1
+  universe: [SPY, QQQ, IWM, DIA, XLF, XLE, GLD, TLT]
+  multiplier: 100
+
+  entry:
+    dte:
+      min: 25
+      target: 45
+      max: 55
+    defined_risk_only: true
+    allowed_structures:
+      - short_put_vertical
+      - short_call_vertical
+      - iron_condor
+      # Constructors not in v1 — listed so config is honest. Scanner SKIPs them.
+      # - debit_vertical
+      # - broken_wing_butterfly
+      # - calendar
+
+  widths: [1, 2.5, 5, 10, 15, 20]
+
+  short_delta:
+    min: 0.16
+    max: 0.35
+
+  min_credit_over_width: 0.20   # credit / width; not a POP maximizer
+
+  require_iv_rank: false        # set true once IV history is wired
+  min_iv_rank: 25
+
+  liquidity:
+    max_bid_ask_pct: 0.15
+    min_open_interest: 100
+    min_volume: 10
+
+  management:
+    default_profit_target_pct: 50
+    calendar_profit_target_pct: 25
+    broken_wing_profit_target_pct: 25
+    manage_at_dte: 21
+
+  portfolio:
+    nav: 100000
+    max_risk_per_trade_pct: 2.0
+    max_total_buying_power_pct: 50.0
+    max_correlated_exposure_pct: 25.0

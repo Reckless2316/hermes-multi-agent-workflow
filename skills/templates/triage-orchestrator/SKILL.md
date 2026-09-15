@@ -124,6 +124,8 @@ When the final fulfillment stage completes, DM the deliverable to the human
 - Narrate one line per decision to Telegram so the human has a pulse.
 - Never auto-approve. The gate is real. "Fully automated" means scout → research
   → one-tap paper fulfill — not skipping the tap.
+- Options TAKEs are produced by `desk/` (`python -m desk.scan`). Do not let a
+  researcher "improve" the strikes. Veto or pass.
 - Only YOU write vault item files and create child tasks. Workers don't fan out.
 - Be honest in scoring/classification — gaming them wastes the human's one tap
   and produces low-value output.

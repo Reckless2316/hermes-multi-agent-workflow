@@ -28,6 +28,10 @@ points at — *not* to edit `engine/`.
 You touch `engine/` only to add a new **mechanism** (a new kind of step, a new
 scoring mode, an embedding backend). You never edit it to encode a **topic**.
 
+The trading **scanner, Tradier adapter, portfolio/BP, and paper manager** live
+in `desk/` — that is a mechanism. Strategy numbers live in `desk/strategy.yaml`.
+LLMs analyze; `desk/` authorizes TAKE/WAIT/SKIP.
+
 If you find yourself writing the human's subject matter into a `.py` file, stop —
 that belongs in config.
 
