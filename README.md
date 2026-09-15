@@ -7,11 +7,11 @@ A reusable skeleton for an **autonomous, multi-agent triage pipeline** built on
 **one human approval gate**, then **fulfills and delivers** — all coordinated on a
 single Hermes Kanban board.
 
-Root `triage.yaml` is wired as an **automated trading desk**: an options-signal
-scout and a swing-trade scout feed board `trading`; setups that clear the rubric
-are researched, routed to paper options / paper swing / watch / shelve, and
-paper-executed only after one Telegram approve. Ideas, detectors, paper-trader
-filters, and the TAKE/WAIT/SKIP vocabulary come from the sibling
+Root `triage.yaml` is wired as an **automated trading desk**: an options scout
+and a swing-trade scout feed board `trading`. **Options strikes, Greeks, max
+loss, and size come from deterministic code in `desk/` (`TASTY_DEFINED_RISK_V1`
++ Tradier)** — Hermes only vetoes. Paper-execution happens after one Telegram
+approve. Swing detectors still come from the sibling
 [model-trader](https://github.com/Reckless2316/model-trader) repo
 (`docs/08-trading-domain.md`).
 
@@ -49,6 +49,7 @@ lives in one file, `triage.yaml`.
 pip install -r requirements.txt          # just PyYAML
 python -m cli.triage validate            # check the trading-desk config
 python -m unittest discover -s tests
+python -m desk.scan --replay tests/fixtures/spy_tasty.json --as-of 2026-09-15
 python -m cli.triage scaffold            # print the Hermes setup plan
 # then:  hermes kanban boards create trading
 ```
@@ -77,6 +78,8 @@ at. Hand your coding agent **`AGENTS.md`** and ask it to walk you through
 ```
 triage.yaml              THE config — your whole pipeline (start here)
 AGENTS.md                Guide for the AI agent adapting this template
+desk/                    Deterministic trading mechanism (Tradier, tasty v1)
+  strategy.yaml          DTE / widths / BP / 25-50% management parameters
 engine/                  Generic engine (rarely edited)
 proposal_actions.py      Human-gate handler (approve/shelve/modify)
 paths/                   Per-path templates (rails, specs, proposals, philosophy)

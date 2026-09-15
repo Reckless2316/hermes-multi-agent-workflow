@@ -1,7 +1,8 @@
 # Example: automated-trading (the live desk)
 
 Root `triage.yaml` is this pipeline. Deep map: **`docs/08-trading-domain.md`**.
-Filled-in scout skills live in `skills/templates/triage-scout-options/` and
+Options numbers are authorized by **`desk/`** (`python -m desk.scan`), not by
+the LLM scout. Filled-in scout skills live in `skills/templates/triage-scout-options/` and
 `triage-scout-swing/`.
 
 ## What it does

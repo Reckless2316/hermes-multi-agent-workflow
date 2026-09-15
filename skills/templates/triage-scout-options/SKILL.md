@@ -1,9 +1,9 @@
 ---
 name: triage-scout-options
 description: >
-  Options-signal scout for the automated-trading Hermes desk. Runs on a cron under
-  the options_scout profile, searches for defined-risk options setups, writes an
-  intake report, and creates one `intake` Kanban task on the `trading` board.
+  Options scout for the automated-trading Hermes desk. Runs TASTY_DEFINED_RISK_V1
+  (`python -m desk.scan --emit-intake`), files TAKE/WAIT verbatim, and creates one
+  intake Kanban task on the `trading` board. Does not invent strikes or size.
 metadata:
   hermes:
     tags: [triage, scout, intake, options, trading]
@@ -32,33 +32,32 @@ list `kanban` in its `toolsets:` or `kanban_create` silently does nothing.
 
 ## What to look for
 
-Scout liquid US equities and ETFs for DEFINED-RISK options setups only.
-Look for unusual options activity (volume >> open interest, sweeps,
-blocks), IV-rank extremes, and event-driven structures (earnings,
-FOMC, product launches) that can be expressed as a debit/credit
-spread, iron condor, or calendar — never naked short premium.
+Do NOT invent strikes, credits, Greeks, max loss, or size.
 
-Each candidate must name: underlying, direction (or neutral), expiry,
-strikes, structure, debit/credit, max loss, estimated R, IV rank,
-catalyst, and why the underlying confirms (or why a non-directional
-structure is justified). Quote the flow or IV snapshot.
+Run the deterministic scanner from the repo root:
+  python -m desk.scan --emit-intake
+(live: TRADIER_ACCESS_TOKEN; offline: --replay path/to/fixture.json)
 
-Skip: lottery 0DTE calls with no structure, "guaranteed" screenshots,
-setups with undefined risk, illiquid strikes, or claims you cannot
-trace to a primary source (flow print, chain snapshot, or filing).
+File every TAKE and WAIT the scanner emitted, verbatim. You may add
+a one-line macro/portfolio note, but you must not change legs, expiry,
+credit, max_loss, qty, or status.
 
-Map every find to a model-trader SetupStatus: TAKE (actionable now),
-WAIT (structure forming — missing confirmation), or do not report
-SKIP / NO_SETUP noise. Quality over quantity; zero candidates is fine.
+Hermes asks only: does context give a reason NOT to take a mechanically
+valid TAKE? That is veto-only. SKIP/NO_SETUP from the scanner are not
+intake items.
+
+If the scanner prints "(no qualifying ...)", write that and still create
+the intake task. Never fabricate a spread to fill a quota.
 
 ## Procedure
 
-1. Search options flow, chains, and event calendars matching the query.
-2. For each distinct candidate, fill every field in the report format below.
-   Underlying confirmation may cite model-trader language (HTF bias, FVG,
-   CISD) when the structure is directional — those are notes, not a score.
-3. Drop noise. Zero candidates is a valid sweep: still write the report and
-   still create the intake task so the orchestrator logs the empty window.
+1. From the hermes-multi-agent-workflow repo root, run
+   `python -m desk.scan --emit-intake` (add `--replay <fixture.json>` if
+   `TRADIER_ACCESS_TOKEN` is unset).
+2. Use that markdown as the report body. Optional: one veto-context line
+   per TAKE. Do not rewrite numbers.
+3. Zero TAKEs/WAITs is valid. Still write the report and create the intake
+   task.
 4. Write the full report to:
    `${HERMES_PROFILE_DIR}/vault/intake/<UTC-timestamp>-options.md`
 5. Create ONE intake Kanban task on the triage board:
@@ -74,40 +73,13 @@ SKIP / NO_SETUP noise. Quality over quantity; zero candidates is fine.
 
 ## Report format (contract with engine/intake_parser.py)
 
-```
-source: options
-captured_at: <UTC timestamp>
-scrape_window_start: <UTC ISO>
-scrape_window_end: <UTC ISO>
-
-## Candidate: <SYMBOL> <structure> <expiry>
-Claim: <one-line thesis>
-Sources:
-  - url: https://...
-    quote: "verbatim flow or chain snapshot"
-Symbol: <SPY>
-Style: options
-Direction: <long|short|neutral>
-Setup status: TAKE
-Timeframe: <expiry + underlying TF you used>
-Entry: <debit/credit or underlying trigger>
-Stop: <invalidation / structure worthless>
-Target: <credit width / 1R>
-Gates passed: FLOW_OK, DEFINED_RISK, IV_CONTEXT
-Reason: <specific>
-Structure: <put-debit-spread>
-Max loss: <dollars>
-Risk R: <number>
-Catalyst: <earnings 2026-09-12 | none>
-Why it may matter: <one line>
-```
-
-Use `Setup status: WAIT` when one named confirmation is missing; put that
-event in `Reason`.
+Prefer the scanner's `--emit-intake` output unchanged. It already matches
+the Candidate block contract (`title`, `claim`, `sources`, plus Symbol /
+Structure / Max loss / …).
 
 ## Don't
 
-- Don't dedup, score, or route — that's the orchestrator's job. You only detect.
+- Don't invent or "improve" strikes, width, credit, max_loss, or qty.
+- Don't dedup, score, or route — that's the orchestrator's job.
 - Don't post anywhere except the intake vault + the one intake task.
-- Don't fabricate sources. No URL or chain snapshot → don't include the claim.
-- Don't emit naked-short or undefined-risk structures.
+- Don't open paper or live orders from this skill.

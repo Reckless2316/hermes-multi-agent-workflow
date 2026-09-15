@@ -29,6 +29,12 @@ transcripts). Until then, use these defaults.
 7. Would I still take this if I had already taken two losers today? (If no, SKIP.)
 8. For WAIT: is the missing event a single observable print?
 
-If it's dumb obvious → **TAKE** (propose the options or swing path).
-If something's off, forced, or iffy → **SKIP** (classifier `skip` / `no_edge`).
-If I'd want more confirmation → **WAIT** (classifier `wait`).
+Hermes can research, challenge, rank context, explain, and **veto**. It must
+not invent strikes, Greeks, buying-power, max loss, position size, or whether
+a hard risk gate passed. Those numbers come from `desk/` (`TASTY_DEFINED_RISK_V1`).
+
+If it's dumb obvious **and the scanner said TAKE** → propose the options path.
+If something's off, forced, or iffy → **SKIP**.
+If the scanner said WAIT → watch.
+If you would override a TAKE because of news/chop/correlation the gates
+could not see → veto (classifier `skip` / `no_edge`), and say which clause.
