@@ -1,0 +1,115 @@
+# Objective-driven defined-risk options planner (paper only).
+#
+# One continuous dial, `aggression` in [0, 1], locates the trade's purpose:
+#   0.0 income       - sell rich premium, high POP, capital efficiency first
+#   0.5 growth       - directional debit structures, moderate POP, stock-replacement deltas
+#   1.0 speculation  - convex OTM debits, small risk, large payoff, low POP by design
+# Between anchors every number below is linearly interpolated and both anchors'
+# structure menus are searched. See docs/14-objective-options.md.
+#
+# Every value is a stated hypothesis, not a fitted parameter. Collect >= 50 clean
+# paper occurrences per objective before tuning anything.
+name: objective_options_v1
+version: 1
+mode: paper
+
+universe:
+  symbols: [SPY, QQQ, IWM]
+
+liquidity:
+  min_open_interest: 100
+  min_volume: 10
+  max_bid_ask_pct_mid: 0.20
+  require_two_sided_market: true
+
+width:
+  minimum: 2.5
+  maximum: 20
+  preferred: [5, 10, 15, 20]
+  tolerance: 0.51
+
+max_candidates_per_structure: 3
+
+management:
+  force_close_at_dte: 1
+
+risk:
+  max_contracts_per_trade: 10
+  max_total_defined_risk_pct: null
+  max_correlated_defined_risk_pct: null
+
+objectives:
+  income:
+    aggression: 0.0
+    dte: {min: 25, target: 45, max: 50}
+    short_delta: {minimum: 0.20, target: 0.30, maximum: 0.35}
+    long_delta: {minimum: 0.65, target: 0.75, maximum: 0.85}
+    min_pop: 0.40                 # sanity floor: admits V1-style ~0.30-delta condors; ranking stays capital-efficiency first
+    min_credit_to_width: 0.30
+    min_payoff_multiple: 0.25
+    max_breakeven_em: 0.50
+    profit_target_pct: 0.50       # credit: fraction of max profit
+    stop_loss_pct: null           # defined risk; manage at DTE instead
+    manage_at_dte: 21
+    risk_per_trade_pct: 0.01
+    weights: {capital_efficiency: 0.60, pop: 0.25, payoff: 0.00, model_edge: 0.15}
+    structures:
+      bullish: [short_put_vertical]
+      bearish: [short_call_vertical]
+      neutral: [iron_condor]
+  growth:
+    aggression: 0.5
+    dte: {min: 45, target: 75, max: 120}
+    short_delta: {minimum: 0.15, target: 0.25, maximum: 0.30}
+    long_delta: {minimum: 0.50, target: 0.65, maximum: 0.75}
+    min_pop: 0.35
+    min_credit_to_width: 0.25
+    min_payoff_multiple: 1.00     # debit verticals: max profit >= max loss
+    max_breakeven_em: 0.75        # breakeven within 0.75 expected moves of spot
+    profit_target_pct: 0.50       # debit: +50% return on debit paid (capped at max profit)
+    stop_loss_pct: 0.50           # cut at -50% of debit
+    manage_at_dte: 21
+    risk_per_trade_pct: 0.0075
+    weights: {capital_efficiency: 0.20, pop: 0.30, payoff: 0.25, model_edge: 0.25}
+    structures:
+      bullish: [long_call_vertical, long_call]
+      bearish: [long_put_vertical, long_put]
+      neutral: []
+  speculation:
+    aggression: 1.0
+    dte: {min: 21, target: 45, max: 75}
+    short_delta: {minimum: 0.10, target: 0.15, maximum: 0.20}
+    long_delta: {minimum: 0.15, target: 0.25, maximum: 0.40}
+    min_pop: 0.15
+    min_credit_to_width: 0.20
+    min_payoff_multiple: 2.00
+    max_breakeven_em: 1.50
+    profit_target_pct: 1.00       # debit: +100% on debit paid
+    stop_loss_pct: null           # premium is the stop: size small instead
+    manage_at_dte: 7
+    risk_per_trade_pct: 0.0025
+    weights: {capital_efficiency: 0.10, pop: 0.10, payoff: 0.50, model_edge: 0.30}
+    structures:
+      bullish: [long_call, long_call_vertical]
+      bearish: [long_put, long_put_vertical]
+      neutral: []
+
+regime:
+  rv_window: 20
+  sma_fast: 20
+  sma_slow: 50
+  momentum_lookback: 20
+  trend_z: 0.5
+  strong_trend_z: 1.25
+  iv_rich_ratio: 1.15
+  iv_cheap_ratio: 0.90
+  iv_reference_dte: 30
+
+auto:
+  # Operator risk tolerance: auto never sets the dial above this.
+  max_aggression: 1.0
+  # vol regime (ATM IV / 20d realized vol) x trend -> aggression. null = no edge, no trade.
+  map:
+    rich:  {neutral: 0.0, trend: 0.0,  strong_trend: 0.25}
+    fair:  {neutral: 0.0, trend: 0.5,  strong_trend: 0.5}
+    cheap: {neutral: null, trend: 0.5, strong_trend: 1.0}

@@ -1,7 +1,9 @@
 # 13 — Tradier paper runbook
 Set local `TRADIER_API_TOKEN`, `TRADIER_ACCOUNT_ID`, and `PAPER_TRADING=true`; never commit values.
 Validate with `python -m unittest discover -s tests` and `python -m compileall -q trading scripts tests`.
-Run scan with `python scripts/scan_tradier_options.py --output work/manual/options.md --json-output work/manual/options.json`.
+Run the objective scan with `python scripts/scan_objective_options.py --objective auto --output work/manual/options.md --json-output work/manual/options.json`
+(`--objective income|growth|speculation`, `--aggression 0..1`, `--bias`, `--max-aggression`; see `docs/14-objective-options.md`).
+The V1 credit-only baseline remains `python scripts/scan_tradier_options.py --output ... --json-output ...`.
 Run one shared stream with `python scripts/stream_tradier_market.py`.
 Write sanitized portfolio state with `python scripts/snapshot_tradier_portfolio.py`.
 After `approve <slug>`, select exactly one candidate JSON and run `paper_execute_options.py`; exit 2/

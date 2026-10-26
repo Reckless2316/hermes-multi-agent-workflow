@@ -55,7 +55,7 @@ class OptionsPaperLedger:
                 legs_json TEXT NOT NULL,
                 entry_credit REAL NOT NULL,
                 entry_mark_credit REAL NOT NULL,
-                max_profit REAL NOT NULL,
+                max_profit REAL,
                 max_loss REAL NOT NULL,
                 buying_power_reduction REAL NOT NULL,
                 profit_target_pct REAL NOT NULL,
@@ -83,7 +83,38 @@ class OptionsPaperLedger:
             );
             """
         )
+        self._migrate_nullable_max_profit()
         self.conn.commit()
+
+    def _migrate_nullable_max_profit(self) -> None:
+        """V1 ledgers declared max_profit NOT NULL; long options have none.
+
+        SQLite cannot drop a NOT NULL constraint in place, so rebuild the table
+        inside one transaction, preserving every row and both indexes.
+        """
+        columns = self.conn.execute("PRAGMA table_info(options_positions)").fetchall()
+        if not any(col["name"] == "max_profit" and col["notnull"] for col in columns):
+            return
+        create_sql = self.conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='options_positions'"
+        ).fetchone()["sql"]
+        new_sql = create_sql.replace("max_profit REAL NOT NULL", "max_profit REAL", 1)
+        if new_sql == create_sql:
+            raise RuntimeError("Unexpected options_positions schema; refusing to migrate")
+        names = ", ".join(col["name"] for col in columns)
+        self.conn.commit()
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            self.conn.execute("ALTER TABLE options_positions RENAME TO options_positions_v1")
+            self.conn.execute(new_sql)
+            self.conn.execute(f"INSERT INTO options_positions ({names}) SELECT {names} FROM options_positions_v1")
+            self.conn.execute("DROP TABLE options_positions_v1")
+            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_options_positions_status ON options_positions(status)")
+            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_options_positions_signature ON options_positions(signature)")
+            self.conn.execute("COMMIT")
+        except Exception:
+            self.conn.execute("ROLLBACK")
+            raise
 
     def __enter__(self) -> "OptionsPaperLedger":
         return self
@@ -124,20 +155,28 @@ class OptionsPaperLedger:
                 manage_at_dte, strategy_version, status, entry_time, candidate_json
             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'OPEN',?,?)
             """,
-            (position_id, _signature(item), approval_slug, candidate.underlying, candidate.strategy.value, candidate.expiration, candidate.direction, item.contracts, legs_json, candidate.net_credit, candidate.mark_credit, candidate.max_profit * item.contracts, item.total_max_loss, item.total_buying_power_reduction, candidate.profit_target_pct, candidate.manage_at_dte, candidate.strategy_version, entry_time, json.dumps(candidate_payload, sort_keys=True)),
+            (position_id, _signature(item), approval_slug, candidate.underlying, candidate.strategy.value, candidate.expiration, candidate.direction, item.contracts, legs_json, candidate.net_credit, candidate.mark_credit, None if candidate.max_profit is None else candidate.max_profit * item.contracts, item.total_max_loss, item.total_buying_power_reduction, candidate.profit_target_pct, candidate.manage_at_dte, candidate.strategy_version, entry_time, json.dumps(candidate_payload, sort_keys=True)),
         )
         self._event(position_id, "OPEN", candidate_payload)
         self.conn.commit()
         return position_id
 
     def close_position(self, position_id: str, *, exit_debit: float, reason: str) -> dict[str, Any]:
-        if exit_debit < 0:
-            raise ValueError("exit_debit must be non-negative")
+        """Close at a signed per-share ``exit_debit`` (negative = credit received).
+
+        Credit positions close by paying a debit (>= 0). Debit positions close
+        by selling, i.e. a negative exit_debit; a long structure can never
+        cost money to close, so a positive exit_debit is rejected for them.
+        """
         row = self.conn.execute("SELECT * FROM options_positions WHERE id=?", (position_id,)).fetchone()
         if row is None:
             raise KeyError(position_id)
         if row["status"] != "OPEN":
             raise ValueError("Position is not open")
+        if float(row["entry_credit"]) >= 0 and exit_debit < 0:
+            raise ValueError("credit position exit_debit must be non-negative")
+        if float(row["entry_credit"]) < 0 and exit_debit > 0:
+            raise ValueError("debit position exit_debit must be <= 0 (closing sells the structure)")
         pnl = (float(row["entry_credit"]) - exit_debit) * 100.0 * int(row["quantity"])
         outcome = "WIN" if pnl > 0 else "LOSS" if pnl < 0 else "BE"
         self.conn.execute("""UPDATE options_positions SET status='CLOSED', exit_time=?, exit_debit=?, realized_pnl=?, outcome=?, close_reason=? WHERE id=?""", (_now(), exit_debit, pnl, outcome, reason, position_id))

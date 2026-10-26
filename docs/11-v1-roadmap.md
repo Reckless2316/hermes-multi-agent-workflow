@@ -8,13 +8,15 @@
 - conservative close pricing, 50% winner and 21-DTE management logic
 - shared SQLite market state and sanitized broker+paper portfolio snapshot
 - durable agent/architecture instructions and deterministic tests
+- objective curve (income / growth / speculation + blends), situation model (IV/RV, trend),
+  debit verticals and long options, signed-premium revalidation/ledger/management
 
 ## Next integration
 - run against real local Tradier credentials
 - wire Hermes board post-gate commands end-to-end
 - add structured position-management Telegram reviews
 - choose/test hard portfolio concentration limits after observing paper data
-- collect at least 50 clean paper occurrences before parameter tuning
+- collect at least 50 clean paper occurrences per objective before parameter tuning
 
 ## Later data enrichment
 Historical IV/IVR, OPRA trades+NBBO, raw flow features, realized vol, event feeds, cohort backtests.

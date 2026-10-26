@@ -43,15 +43,16 @@ These are architecture constraints, not suggestions:
    adapter with separate review and tests.
 3. Tradier current IV/Greeks are not historical IV Rank. Missing IVR stays
    missing. Never infer it with an LLM.
-4. Entry economics use conservative **natural credit** (`short bid - hedge ask`).
-   Midpoint is reference/mark data only.
+4. Entry economics use conservative **natural** prices: credit = `short bid - hedge ask`,
+   debit = `long ask - short bid`. Midpoint is reference/mark data only. Premium is signed
+   in JSON and the ledger: positive credit, negative debit.
 5. `model-trader.PaperTrader` must not size multileg options. It uses one
    entry/stop distance; options risk is defined by leg structure. Use
    `OptionsPaperLedger` for options.
 6. Post-approval execution must re-fetch the exact OCC legs and re-run hard
    gates. Ranking changes alone do not invalidate an approved structure.
-7. Human-approved natural credit is the paper limit. If fresh natural credit is
-   worse, do not chase; return to WAIT/reproposal. If better, the paper ledger
+7. Human-approved natural premium is the paper limit. If fresh natural premium is
+   worse (less credit or more debit), do not chase; return to WAIT/reproposal. If better, the paper ledger
    still fills at the approved limit for conservative accounting while recording
    the fresh quote snapshot.
 8. Run one Tradier market stream service. Share latest state through SQLite WAL
@@ -61,6 +62,17 @@ These are architecture constraints, not suggestions:
 10. Paper execution remains behind the existing human gate. Never auto-approve.
 
 ## Current options strategy boundary
+
+There are two strategy files. Neither may be widened silently.
+
+`strategy/objective_options_v1.yaml` (the scheduled scout's default) adds the
+objective curve income → growth → speculation. It may also build long call/put
+verticals and long calls/puts, where the debit paid is the max loss. The
+objective, dial, and bias are decided by `trading/objectives.py` from measured
+IV/RV and trend or from explicit operator input; agents must report that
+decision, never change it. Risk per trade falls along the curve; never raise it.
+Auto-mode `null` cells and unknown situations mean no trade, not a guess.
+See `docs/14-objective-options.md`.
 
 `strategy/tasty_defined_risk_v1.yaml` currently supports only:
 
@@ -72,8 +84,9 @@ It is a paper-only, defined-risk premium-selling baseline. Do not silently add
 naked premium, ratio spreads with undefined risk, 0DTE lottery structures, or
 live execution.
 
-The ranking objective is capital efficiency first, then actual premium dollars,
-then width as a tie-breaker. Do not replace this with headline POP ranking.
+The V1 ranking objective is capital efficiency first, then actual premium dollars,
+then width as a tie-breaker. Do not replace this with headline POP ranking; the
+objective planner's income anchor keeps capital efficiency as its dominant weight.
 
 ## Human/LLM boundary
 

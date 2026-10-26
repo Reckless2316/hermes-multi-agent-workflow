@@ -1,12 +1,17 @@
 """Post-approval exact-leg revalidation."""
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date
+from typing import Callable, Iterable
 
 from .options_engine import scan_defined_risk
 from .portfolio import SizingRejected, size_candidate
-from .types import AccountSnapshot, SizedCandidate, SpreadCandidate
+from .structures import StructureEconomicsError, reprice
+from .types import AccountSnapshot, OptionContract, SizedCandidate, SpreadCandidate
+
+# (underlying, exact-leg chain, cfg, as_of) -> candidates passing all gates
+Rescan = Callable[[str, list[OptionContract], object, "date | None"], Iterable[SpreadCandidate]]
 
 
 class RevalidationRejected(ValueError):
@@ -27,29 +32,19 @@ class RevalidationResult:
     reason: str
 
     def to_fill_candidate(self) -> SizedCandidate:
-        """Record fresh quotes while retaining the human-approved credit limit."""
-        fresh = self.fresh_market_candidate
-        max_profit = self.fill_credit * 100.0
-        max_loss = (fresh.width - self.fill_credit) * 100.0
-        if max_loss <= 0:
+        """Record fresh quotes while retaining the human-approved premium limit."""
+        try:
+            filled = reprice(self.fresh_market_candidate, self.fill_credit)
+        except StructureEconomicsError as exc:
             raise RevalidationRejected(
-                "Approved fill credit makes max-loss math invalid"
-            )
-        target = max_profit * fresh.profit_target_pct
-        filled = replace(
-            fresh,
-            net_credit=self.fill_credit,
-            max_profit=max_profit,
-            max_loss=max_loss,
-            buying_power_reduction=max_loss,
-            profit_target_dollars=target,
-            capital_efficiency=target / max_loss,
-            premium_to_bpr=max_profit / max_loss,
-            reason=(
-                fresh.reason
-                + "; paper fill locked to human-approved credit limit"
-            ),
+                f"Approved fill premium makes max-loss math invalid: {exc}"
+            ) from exc
+        filled.reason = (
+            self.fresh_market_candidate.reason
+            + "; paper fill locked to human-approved premium limit"
         )
+        max_loss = filled.max_loss
+        target = filled.profit_target_dollars
         quantity = self.approved.contracts
         return SizedCandidate(
             candidate=filled,
@@ -70,8 +65,17 @@ def revalidate_for_paper_fill(
     *,
     as_of: date | None = None,
     committed_defined_risk: float = 0.0,
+    rescan: Rescan | None = None,
 ) -> RevalidationResult:
-    """Revalidate the exact approved OCC structure, not its discovery rank."""
+    """Revalidate the exact approved OCC structure, not its discovery rank.
+
+    ``rescan`` rebuilds candidates from the exact-leg chain; it defaults to the
+    V1 credit scanner. Objective candidates pass a closure over their stored
+    profile so their own objective gates are re-run on fresh quotes.
+
+    Premium is signed (credit positive, debit negative), so a lower fresh
+    natural premium is always worse: less credit or more debit. Never chase.
+    """
     signature = _signature(approved.candidate)
     required = set(signature)
     exact_chain = [contract for contract in fresh_chain if contract.symbol in required]
@@ -79,12 +83,15 @@ def revalidate_for_paper_fill(
         missing = sorted(required - {contract.symbol for contract in exact_chain})
         raise RevalidationRejected(f"Fresh chain missing approved legs: {missing}")
 
-    fresh_candidates = scan_defined_risk(
-        approved.candidate.underlying,
-        exact_chain,
-        cfg,
-        as_of=as_of,
-    )
+    if rescan is None:
+        fresh_candidates = scan_defined_risk(
+            approved.candidate.underlying,
+            exact_chain,
+            cfg,
+            as_of=as_of,
+        )
+    else:
+        fresh_candidates = list(rescan(approved.candidate.underlying, exact_chain, cfg, as_of))
     fresh = next(
         (candidate for candidate in fresh_candidates if _signature(candidate) == signature),
         None,
@@ -97,8 +104,9 @@ def revalidate_for_paper_fill(
     approved_credit = approved.candidate.net_credit
     if fresh.net_credit + 1e-9 < approved_credit:
         raise RevalidationRejected(
-            f"Natural credit deteriorated from {approved_credit:.2f} "
-            f"to {fresh.net_credit:.2f}; do not chase"
+            f"Natural {'debit' if approved.candidate.is_debit else 'credit'} "
+            f"deteriorated from {abs(approved_credit):.2f} "
+            f"to {abs(fresh.net_credit):.2f}; do not chase"
         )
 
     try:
@@ -124,7 +132,7 @@ def revalidate_for_paper_fill(
         approved_limit_credit=approved_credit,
         fill_credit=approved_credit,
         reason=(
-            "Exact structure still passes; current natural credit "
-            "meets/exceeds approved paper limit"
+            "Exact structure still passes; current natural premium "
+            "meets/beats approved paper limit"
         ),
     )
