@@ -42,7 +42,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--aggression", type=unit_interval, help="explicit dial in [0,1]; overrides --objective")
     p.add_argument("--bias", choices=["auto", "bullish", "bearish", "neutral"], default="auto", help="operator thesis; auto follows the measured trend")
     p.add_argument("--max-aggression", type=unit_interval, help="cap for auto mode (default: config auto.max_aggression)")
-    p.add_argument("--risk-per-trade-pct", type=float, help="reduce (never raise) the profile's risk per trade, e.g. 0.005")
+    p.add_argument("--risk-per-trade-pct", type=float, help="cap risk per trade, e.g. 0.005; profiles already below the cap are unchanged")
     p.add_argument("--symbols")
     p.add_argument("--max-per-symbol", type=int, default=3)
     p.add_argument("--output")
@@ -64,8 +64,8 @@ def main() -> int:
         cfg = ObjectiveConfig.load(a.config)
     except ObjectiveConfigError as exc:
         raise SystemExit(str(exc)) from exc
-    if a.risk_per_trade_pct is not None and not 0 < a.risk_per_trade_pct <= min(p.risk_per_trade_pct for p in cfg.anchors):
-        raise SystemExit("--risk-per-trade-pct must be > 0 and no larger than the most conservative anchor's risk")
+    if a.risk_per_trade_pct is not None and not 0 < a.risk_per_trade_pct <= 1:
+        raise SystemExit("--risk-per-trade-pct must be in (0, 1]; it caps each profile's risk and never raises it")
     symbols = tuple(x.strip().upper() for x in a.symbols.split(",") if x.strip()) if a.symbols else cfg.universe
     if not symbols:
         raise SystemExit("Strategy universe is empty")

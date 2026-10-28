@@ -12,6 +12,9 @@ from .types import AccountSnapshot, OptionContract, SizedCandidate, SpreadCandid
 
 # (underlying, exact-leg chain, cfg, as_of) -> candidates passing all gates
 Rescan = Callable[[str, list[OptionContract], object, "date | None"], Iterable[SpreadCandidate]]
+# Re-gates the fresh structure repriced at the approved fill premium; raises
+# RevalidationRejected or returns the candidate carrying fill-premium analytics.
+FillGate = Callable[[SpreadCandidate], SpreadCandidate]
 
 
 class RevalidationRejected(ValueError):
@@ -30,15 +33,11 @@ class RevalidationResult:
     approved_limit_credit: float
     fill_credit: float
     reason: str
+    fill_candidate: SpreadCandidate | None = None
 
     def to_fill_candidate(self) -> SizedCandidate:
         """Record fresh quotes while retaining the human-approved premium limit."""
-        try:
-            filled = reprice(self.fresh_market_candidate, self.fill_credit)
-        except StructureEconomicsError as exc:
-            raise RevalidationRejected(
-                f"Approved fill premium makes max-loss math invalid: {exc}"
-            ) from exc
+        filled = self.fill_candidate or _reprice_or_reject(self.fresh_market_candidate, self.fill_credit)
         filled.reason = (
             self.fresh_market_candidate.reason
             + "; paper fill locked to human-approved premium limit"
@@ -57,6 +56,15 @@ class RevalidationResult:
         )
 
 
+def _reprice_or_reject(candidate: SpreadCandidate, premium: float) -> SpreadCandidate:
+    try:
+        return reprice(candidate, premium)
+    except StructureEconomicsError as exc:
+        raise RevalidationRejected(
+            f"Approved fill premium makes max-loss math invalid: {exc}"
+        ) from exc
+
+
 def revalidate_for_paper_fill(
     approved: SizedCandidate,
     fresh_chain,
@@ -66,12 +74,16 @@ def revalidate_for_paper_fill(
     as_of: date | None = None,
     committed_defined_risk: float = 0.0,
     rescan: Rescan | None = None,
+    fill_gate: FillGate | None = None,
 ) -> RevalidationResult:
     """Revalidate the exact approved OCC structure, not its discovery rank.
 
     ``rescan`` rebuilds candidates from the exact-leg chain; it defaults to the
     V1 credit scanner. Objective candidates pass a closure over their stored
-    profile so their own objective gates are re-run on fresh quotes.
+    profile so their own objective gates are re-run on fresh quotes, and a
+    ``fill_gate`` that re-runs the premium-dependent gates (POP, payoff,
+    breakeven reach) at the approved fill premium: a cheaper fresh quote must
+    not let a fill at the approved price slip under a gate.
 
     Premium is signed (credit positive, debit negative), so a lower fresh
     natural premium is always worse: less credit or more debit. Never chase.
@@ -125,6 +137,10 @@ def revalidate_for_paper_fill(
             f"approved {approved.contracts}; repropose"
         )
 
+    fill_candidate = None
+    if fill_gate is not None:
+        fill_candidate = fill_gate(_reprice_or_reject(fresh, approved_credit))
+
     return RevalidationResult(
         approved=approved,
         fresh_market_candidate=fresh,
@@ -135,4 +151,5 @@ def revalidate_for_paper_fill(
             "Exact structure still passes; current natural premium "
             "meets/beats approved paper limit"
         ),
+        fill_candidate=fill_candidate,
     )

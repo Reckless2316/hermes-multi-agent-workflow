@@ -44,6 +44,10 @@ from .regime import MarketSituation
 from .structures import StructureEconomicsError, economics, profit_target_dollars, reprice
 from .types import GateCheck, OptionContract, SetupStatus, SpreadCandidate, StrategyKind
 
+# Gates added by ``evaluate``; they depend on premium and spot, so they are
+# re-run (not inherited) whenever either changes.
+OBJECTIVE_GATES = frozenset({"POP_OK", "PAYOFF_MULTIPLE", "BREAKEVEN_REACH"})
+
 DEBIT_BUILDERS = {
     "long_call_vertical": ("call", True),
     "long_put_vertical": ("put", True),
@@ -108,7 +112,7 @@ def _debit_candidate(
         width_ok = cfg.width.minimum <= width <= cfg.width.maximum
         gates.append(GateCheck("WIDTH_OK", width_ok, f"width {width:.2f}", width))
     try:
-        max_profit, max_loss = economics(kind, width, natural_premium)
+        max_profit, max_loss = economics(kind, width, natural_premium, long.strike if short is None else None)
         defined = True
         detail = f"debit={-natural_premium:.2f}, max_loss={max_loss:.2f}"
     except StructureEconomicsError as exc:

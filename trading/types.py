@@ -116,7 +116,7 @@ class SpreadCandidate:
     # Signed net premium per share: positive = credit received, negative = debit paid.
     net_credit: float
     mark_credit: float
-    # None means unbounded (long calls/puts).
+    # None means unbounded (long calls only).
     max_profit: float | None
     max_loss: float
     buying_power_reduction: float

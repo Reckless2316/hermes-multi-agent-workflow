@@ -64,20 +64,20 @@ def main() -> int:
 
     underlying = approved.candidate.underlying
     chain = client.option_chain(underlying, approved.candidate.expiration, greeks=True)
-    rescan = None
+    rescan = fill_gate = None
     if objective:
         quotes = client.quotes([underlying])
         spot = spot_from_quote(quotes[0]) if quotes else None
         if spot is None:
             print("WAIT_REPROPOSE: no live underlying price for objective gates")
             return 2
-        rescan, cfg = revalidation_context(objective_cfg, approved.candidate, spot=spot)
+        rescan, cfg, fill_gate = revalidation_context(objective_cfg, approved.candidate, spot=spot)
     else:
         cfg = StrategyConfig.load(a.config)
 
     with OptionsPaperLedger(a.ledger) as ledger:
         try:
-            rv = revalidate_for_paper_fill(approved, chain, account, cfg, committed_defined_risk=ledger.committed_defined_risk(), rescan=rescan)
+            rv = revalidate_for_paper_fill(approved, chain, account, cfg, committed_defined_risk=ledger.committed_defined_risk(), rescan=rescan, fill_gate=fill_gate)
         except RevalidationRejected as exc:
             print(f"WAIT_REPROPOSE: {exc}")
             return 2

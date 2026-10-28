@@ -20,8 +20,17 @@ class StructureEconomicsError(ValueError):
     pass
 
 
-def economics(kind: StrategyKind, width: float, net_premium: float) -> tuple[float | None, float]:
-    """Return (max_profit, max_loss) in dollars per contract (100 multiplier)."""
+def economics(
+    kind: StrategyKind,
+    width: float,
+    net_premium: float,
+    strike: float | None = None,
+) -> tuple[float | None, float]:
+    """Return (max_profit, max_loss) in dollars per contract (100 multiplier).
+
+    ``strike`` is required for a long put, whose profit is capped at the
+    underlying going to zero: (strike - debit) * 100. A long call is unbounded.
+    """
     if kind in CREDIT_STRATEGIES:
         if net_premium <= 0:
             raise StructureEconomicsError(f"{kind.value} requires a net credit, got {net_premium:.2f}")
@@ -36,6 +45,13 @@ def economics(kind: StrategyKind, width: float, net_premium: float) -> tuple[flo
         max_profit = (width - debit) * 100.0
         if max_profit <= 0:
             raise StructureEconomicsError(f"debit {debit:.2f} >= width {width:.2f}")
+        return round(max_profit, 2), round(debit * 100.0, 2)
+    if kind == StrategyKind.LONG_PUT:
+        if strike is None:
+            raise StructureEconomicsError("long_put economics need the strike")
+        max_profit = (strike - debit) * 100.0
+        if max_profit <= 0:
+            raise StructureEconomicsError(f"debit {debit:.2f} >= strike {strike:.2f}")
         return round(max_profit, 2), round(debit * 100.0, 2)
     if kind in LONG_OPTION_STRATEGIES:
         return None, round(debit * 100.0, 2)
@@ -58,7 +74,8 @@ def profit_target_dollars(
 
 def reprice(candidate: SpreadCandidate, net_premium: float) -> SpreadCandidate:
     """Recompute all premium-derived economics at a new signed fill premium."""
-    max_profit, max_loss = economics(candidate.strategy, candidate.width, net_premium)
+    strike = candidate.legs[0].strike if candidate.strategy in LONG_OPTION_STRATEGIES else None
+    max_profit, max_loss = economics(candidate.strategy, candidate.width, net_premium, strike)
     target = profit_target_dollars(candidate.strategy, max_profit, max_loss, candidate.profit_target_pct)
     return replace(
         candidate,

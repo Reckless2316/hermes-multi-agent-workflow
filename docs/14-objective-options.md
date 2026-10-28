@@ -101,7 +101,7 @@ Because of that, existing mechanisms work unchanged in meaning:
   credit *or* more debit is rejected. Objective candidates re-run their own builder and objective
   gates on the exact OCC legs with the fresh spot (`revalidation_context`).
 - `OptionsPaperLedger` P&L is `(entry − exit) × 100 × qty` for both. A debit position closes with a
-  negative `exit_debit` (you receive the sale). `max_profit` is `NULL` for long options; V1 ledgers
+  negative `exit_debit` (you receive the sale). `max_profit` is `NULL` for long calls (unbounded); V1 ledgers
   are migrated in place (atomically) on first open.
 - `manage_paper_options.py` routes each row by sign: credits use the V1 rules; debits use
   `manage_debit_position` (target on debit, optional stop, exit at management DTE before theta

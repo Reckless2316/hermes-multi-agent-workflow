@@ -6,14 +6,15 @@ option_chain, balances, positions).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from typing import Any
 
 from .duplicates import broker_has_exact_structure
-from .objective_engine import choose_objective_expiration, choose_reference_expiration, scan_objective
+from .objective_engine import OBJECTIVE_GATES, choose_objective_expiration, choose_reference_expiration, evaluate, scan_objective
 from .objectives import ObjectiveConfig, ObjectiveDecision, ObjectiveProfile, decide, with_risk_override
 from .portfolio import SizingRejected, size_candidate
+from .revalidate import RevalidationRejected
 from .regime import MarketSituation, classify, closes_from_history
 from .tradier import TradierError
 from .types import AccountSnapshot, OptionContract, SizedCandidate, SpreadCandidate
@@ -239,13 +240,14 @@ def is_objective_candidate(candidate: SpreadCandidate, cfg: ObjectiveConfig) -> 
 def revalidation_context(cfg: ObjectiveConfig, approved: SpreadCandidate, *, spot: float):
     """Rebuild the approved candidate's profile/bias/situation for exact-leg recheck.
 
-    Returns ``(rescan, sizing_cfg)`` for ``revalidate_for_paper_fill``. The
-    stored situation supplies realized vol for scoring only; hard gates (POP,
-    breakeven reach, liquidity, delta) are re-run on the fresh spot and chain.
+    Returns ``(rescan, sizing_cfg, fill_gate)`` for ``revalidate_for_paper_fill``.
+    The stored situation supplies realized vol for scoring only; hard gates
+    (POP, payoff, breakeven reach, liquidity, delta) are re-run on the fresh
+    spot and chain, and the premium-dependent ones again at the fill premium.
     """
     stored = approved.analytics
     profile = cfg.profile_at(float(stored["profile"]["aggression"]))
-    profile = with_risk_override(profile, min(profile.risk_per_trade_pct, float(stored["profile"]["risk_per_trade_pct"])))
+    profile = with_risk_override(profile, float(stored["profile"]["risk_per_trade_pct"]))
     bias = (stored.get("objective_decision") or {}).get("bias")
     situation_raw = dict(stored.get("situation") or {})
     situation_raw["spot"] = spot
@@ -255,4 +257,13 @@ def revalidation_context(cfg: ObjectiveConfig, approved: SpreadCandidate, *, spo
     def rescan(underlying, exact_chain, _cfg, as_of):
         return scan_objective(underlying, exact_chain, cfg, profile, spot=spot, situation=situation, bias=bias, as_of=as_of, context={"objective_decision": stored.get("objective_decision", {})})
 
-    return rescan, sizing_cfg
+    def fill_gate(at_fill: SpreadCandidate) -> SpreadCandidate:
+        base = replace(at_fill, gates=[g for g in at_fill.gates if g.name not in OBJECTIVE_GATES])
+        checked, failed = evaluate(base, spot=spot, situation=situation, profile=profile)
+        if checked is None:
+            raise RevalidationRejected(
+                f"{failed} fails at the approved fill premium {abs(at_fill.net_credit):.2f}; do not fill"
+            )
+        return checked
+
+    return rescan, sizing_cfg, fill_gate

@@ -23,7 +23,7 @@ from trading.config import StrategyConfig  # noqa: E402
 from trading.intake import candidate_id, render_objective_intake  # noqa: E402
 from trading.objective_engine import scan_objective  # noqa: E402
 from trading.objective_scan import revalidation_context, run_objective_scan, sidecar_payload, spot_from_quote  # noqa: E402
-from trading.objectives import ObjectiveConfig, ObjectiveConfigError, decide  # noqa: E402
+from trading.objectives import ObjectiveConfig, ObjectiveConfigError, decide, with_risk_override  # noqa: E402
 from trading.paper_options import OptionsPaperLedger  # noqa: E402
 from trading.portfolio import size_candidate  # noqa: E402
 from trading.position_manager import manage_debit_position, natural_close_debit, natural_close_value, plan_position  # noqa: E402
@@ -95,7 +95,11 @@ class StructureEconomicsTests(unittest.TestCase):
     def test_economics(self):
         self.assertEqual(economics(StrategyKind.SHORT_PUT_VERTICAL, 5.0, 1.5), (150.0, 350.0))
         self.assertEqual(economics(StrategyKind.LONG_CALL_VERTICAL, 10.0, -4.0), (600.0, 400.0))
-        self.assertEqual(economics(StrategyKind.LONG_PUT, 0.0, -2.5), (None, 250.0))
+        self.assertEqual(economics(StrategyKind.LONG_CALL, 0.0, -2.5), (None, 250.0))
+        # a long put is capped at the underlying going to zero
+        self.assertEqual(economics(StrategyKind.LONG_PUT, 0.0, -2.5, 100.0), (9750.0, 250.0))
+        with self.assertRaises(StructureEconomicsError):
+            economics(StrategyKind.LONG_PUT, 0.0, -2.5)
 
     def test_wrong_sign_rejected(self):
         with self.assertRaises(StructureEconomicsError):
@@ -183,6 +187,16 @@ class ObjectiveConfigTests(unittest.TestCase):
         cfg = ObjectiveConfig.load(CONFIG_PATH)
         risks = [cfg.profile_at(x / 10).risk_per_trade_pct for x in range(11)]
         self.assertEqual(risks, sorted(risks, reverse=True))
+
+    def test_risk_override_caps_and_never_raises(self):
+        cfg = ObjectiveConfig.load(CONFIG_PATH)
+        blended = cfg.profile_at(0.3)
+        self.assertEqual(with_risk_override(blended, 0.005).risk_per_trade_pct, 0.005)
+        self.assertEqual(with_risk_override(cfg.anchor("income"), 0.005).risk_per_trade_pct, 0.005)
+        speculation = cfg.anchor("speculation")
+        self.assertIs(with_risk_override(speculation, 0.005), speculation)
+        with self.assertRaises(ObjectiveConfigError):
+            with_risk_override(blended, 0.0)
 
     def test_unknown_bias_admits_only_non_directional(self):
         cfg = ObjectiveConfig.load(CONFIG_PATH)
@@ -331,8 +345,11 @@ class SizingAndRevalidationTests(unittest.TestCase):
         return contracts, size_candidate(c, account(1_000_000, 1_000_000), sizing)
 
     def revalidate(self, approved, contracts):
-        rescan, sizing = revalidation_context(self.cfg, approved.candidate, spot=600)
-        return revalidate_for_paper_fill(approved, contracts, account(1_000_000, 1_000_000), sizing, as_of=AS_OF, rescan=rescan)
+        return self.revalidate_at(approved, contracts, spot=600)
+
+    def revalidate_at(self, approved, contracts, *, spot):
+        rescan, sizing, fill_gate = revalidation_context(self.cfg, approved.candidate, spot=spot)
+        return revalidate_for_paper_fill(approved, contracts, account(1_000_000, 1_000_000), sizing, as_of=AS_OF, rescan=rescan, fill_gate=fill_gate)
 
     def test_same_quotes_fill_at_approved_debit(self):
         contracts, approved = self.approved()
@@ -357,6 +374,29 @@ class SizingAndRevalidationTests(unittest.TestCase):
         rv = self.revalidate(approved, self._bump(contracts, long_symbol, -0.05))
         self.assertGreater(rv.current_natural_credit, rv.approved_limit_credit)
         self.assertEqual(rv.fill_credit, approved.candidate.net_credit)
+
+    def test_gates_rerun_at_approved_fill_premium(self):
+        # Spot falls 600 -> 598: the fresh long call is cheaper (passes POP at the
+        # fresh debit), but the fill happens at the higher approved debit.
+        profile = self.cfg.anchor("growth")
+        _, at_600 = chain(spot=600, dte=75)
+        _, at_598 = chain(spot=598, dte=75)
+        out = scan_objective("SPY", at_600, self.cfg, profile, spot=600, situation=situation(), bias="bullish", as_of=AS_OF, context={"objective_decision": {"bias": "bullish", "aggression": 0.5}})
+        call = next(c for c in out if c.strategy == StrategyKind.LONG_CALL and c.legs[0].strike == 590.0)
+        approved = size_candidate(call, account(1_000_000, 1_000_000), self.cfg.credit_strategy_config(profile, "bullish"))
+        fresh_pop = pricing.prob_profit(pricing.legs_from_candidate(call), -next(c for c in at_598 if c.symbol == call.legs[0].option_symbol).ask, spot=598, sigma=call.mid_iv, years=75 / 365)
+        self.assertGreaterEqual(fresh_pop, profile.min_pop)  # fresh economics alone would pass
+        with self.assertRaisesRegex(RevalidationRejected, "POP_OK fails at the approved fill premium"):
+            self.revalidate_at(approved, at_598, spot=598)
+
+    def test_fill_analytics_reflect_fill_premium(self):
+        contracts, approved = self.approved()
+        long_symbol = next(l.option_symbol for l in approved.candidate.legs if l.side == "buy_to_open")
+        filled = self.revalidate(approved, self._bump(contracts, long_symbol, -0.05)).to_fill_candidate().candidate
+        legs = pricing.legs_from_candidate(filled)
+        expected = pricing.prob_profit(legs, approved.candidate.net_credit, spot=600, sigma=filled.analytics["model"]["sigma_iv"], years=pricing.years_from_dte(filled.dte))
+        self.assertAlmostEqual(filled.analytics["model"]["pop_iv"], expected)
+        self.assertEqual([g.name for g in filled.gates].count("POP_OK"), 1)
 
     def test_delta_drift_out_of_band_rejects(self):
         contracts, approved = self.approved()

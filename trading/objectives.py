@@ -466,8 +466,11 @@ def decide(
 
 
 def with_risk_override(profile: ObjectiveProfile, risk_per_trade_pct: float | None) -> ObjectiveProfile:
+    """Cap the profile's risk per trade; an override can lower risk, never raise it."""
     if risk_per_trade_pct is None:
         return profile
-    if not 0 < risk_per_trade_pct <= profile.risk_per_trade_pct:
-        raise ObjectiveConfigError("risk override may only reduce the profile's risk_per_trade_pct")
+    if not 0 < risk_per_trade_pct <= 1:
+        raise ObjectiveConfigError("risk override must be in (0, 1]")
+    if risk_per_trade_pct >= profile.risk_per_trade_pct:
+        return profile
     return replace(profile, risk_per_trade_pct=risk_per_trade_pct)
