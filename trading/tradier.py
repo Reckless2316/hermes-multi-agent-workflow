@@ -63,6 +63,12 @@ def _one_or_many(value: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _section(data: Mapping[str, Any], key: str) -> dict[str, Any]:
+    """Tradier returns ``"null"`` (a string) or null for empty collections."""
+    value = data.get(key)
+    return value if isinstance(value, dict) else {}
+
+
 class TradierClient:
     LIVE_BASE = "https://api.tradier.com/v1"
     SANDBOX_BASE = "https://sandbox.tradier.com/v1"
@@ -149,11 +155,11 @@ class TradierClient:
         if not clean:
             return []
         data = self._request_json("GET", "/markets/quotes", params={"symbols": ",".join(clean), "greeks": str(greeks).lower()}).data
-        return _one_or_many((data.get("quotes") or {}).get("quote"))
+        return _one_or_many(_section(data, "quotes").get("quote"))
 
     def option_expirations(self, symbol: str) -> list[str]:
         data = self._request_json("GET", "/markets/options/expirations", params={"symbol": symbol}).data
-        dates = (data.get("expirations") or {}).get("date")
+        dates = _section(data, "expirations").get("date")
         if dates is None:
             return []
         if isinstance(dates, list):
@@ -163,7 +169,7 @@ class TradierClient:
     def option_chain(self, symbol: str, expiration: str, *, greeks: bool = True) -> list[OptionContract]:
         data = self._request_json("GET", "/markets/options/chains", params={"symbol": symbol, "expiration": expiration, "greeks": str(greeks).lower()}).data
         contracts: list[OptionContract] = []
-        for row in _one_or_many((data.get("options") or {}).get("option")):
+        for row in _one_or_many(_section(data, "options").get("option")):
             g = row.get("greeks") or {}
             contracts.append(OptionContract(
                 symbol=str(row.get("symbol") or ""), underlying=str(row.get("underlying") or symbol), expiration=str(row.get("expiration_date") or expiration), option_type=str(row.get("option_type") or "").lower(), strike=_number(row.get("strike")), bid=_number(row.get("bid")), ask=_number(row.get("ask")), last=None if row.get("last") is None else _number(row.get("last")), volume=_integer(row.get("volume")), open_interest=_integer(row.get("open_interest")), delta=None if g.get("delta") is None else _number(g.get("delta")), gamma=None if g.get("gamma") is None else _number(g.get("gamma")), theta=None if g.get("theta") is None else _number(g.get("theta")), vega=None if g.get("vega") is None else _number(g.get("vega")), rho=None if g.get("rho") is None else _number(g.get("rho")), mid_iv=None if g.get("mid_iv") is None else _number(g.get("mid_iv")), bid_iv=None if g.get("bid_iv") is None else _number(g.get("bid_iv")), ask_iv=None if g.get("ask_iv") is None else _number(g.get("ask_iv")), greeks_updated_at=None if g.get("updated_at") is None else str(g.get("updated_at"))))
@@ -171,7 +177,7 @@ class TradierClient:
 
     def history(self, symbol: str, *, interval: str = "daily", start: str | None = None, end: str | None = None) -> list[dict[str, Any]]:
         data = self._request_json("GET", "/markets/history", params={"symbol": symbol, "interval": interval, "start": start, "end": end}).data
-        return _one_or_many((data.get("history") or {}).get("day"))
+        return _one_or_many(_section(data, "history").get("day"))
 
     def user_profile(self) -> dict[str, Any]:
         return self._request_json("GET", "/user/profile").data
@@ -196,13 +202,13 @@ class TradierClient:
     def positions(self, account_id: str | None = None) -> list[dict[str, Any]]:
         account = self._require_account(account_id)
         data = self._request_json("GET", f"/accounts/{urllib.parse.quote(account)}/positions").data
-        return _one_or_many((data.get("positions") or {}).get("position"))
+        return _one_or_many(_section(data, "positions").get("position"))
 
     def orders(self, account_id: str | None = None) -> list[dict[str, Any]]:
         """Read current/historical broker orders; this method does not submit any."""
         account = self._require_account(account_id)
         data = self._request_json("GET", f"/accounts/{urllib.parse.quote(account)}/orders").data
-        return _one_or_many((data.get("orders") or {}).get("order"))
+        return _one_or_many(_section(data, "orders").get("order"))
 
     def create_market_session(self) -> str:
         if self.sandbox:

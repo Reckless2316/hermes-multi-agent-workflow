@@ -75,6 +75,8 @@ class TradierTests(unittest.TestCase):
   c=FakeTradier({"/markets/clock":{"clock":{"state":"open","description":"Market is open"}}});self.assertTrue(c.market_is_open())
  def test_market_clock_closed(self):
   c=FakeTradier({"/markets/clock":{"clock":{"state":"closed"}}});self.assertFalse(c.market_is_open())
+ def test_empty_collections_are_string_null(self):
+  c=FakeTradier({"/accounts/TEST/positions":{"positions":"null"},"/accounts/TEST/orders":{"orders":"null"},"/markets/history":{"history":None},"/markets/quotes":{"quotes":"null"},"/markets/options/expirations":{"expirations":None}});self.assertEqual((c.positions(),c.orders(),c.history("SPY"),c.quotes(["SPY"]),c.option_expirations("SPY")),([],[],[],[],[]))
  def test_single_position(self):self.assertEqual(len(FakeTradier({"/accounts/TEST/positions":{"positions":{"position":{"symbol":"SPY"}}}}).positions()),1)
  def test_chain_without_greeks(self):
   rows=FakeTradier({"/markets/options/chains":{"options":{"option":{"symbol":"SPY261030P00650000","underlying":"SPY","expiration_date":EXP,"option_type":"put","strike":650,"bid":5.2,"ask":5.4,"open_interest":1000,"volume":200}}}}).option_chain("SPY",EXP);self.assertIsNone(rows[0].delta)

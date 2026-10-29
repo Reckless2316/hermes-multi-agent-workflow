@@ -44,7 +44,7 @@ research earnings/macro context, explain, or veto a mechanically valid setup. It
 cannot invent or hand-edit option prices, strikes, Greeks, max loss, BPR, size,
 or hard-gate results.
 
-## Options V1
+## Options V1 (credit baseline)
 
 `strategy/tasty_defined_risk_v1.yaml` is a paper-only defined-risk
 premium-selling baseline built around the user's stated tasty-style priorities:
@@ -62,6 +62,28 @@ fills. Tradier supplies current option quotes plus ORATS Greeks/IV; historical I
 Rank is not supplied by Tradier, so the system reports it as unavailable instead
 of manufacturing it.
 
+## Objective options: income → growth → speculation
+
+`strategy/objective_options_v1.yaml` turns the options desk into an objective-driven
+planner. One dial, `aggression` from 0 to 1, sets the trade's purpose:
+
+| dial | objective | builds | sized at |
+|---|---|---|---|
+| 0.0 | income | credit verticals / iron condors on rich premium, capital efficiency first | 1.00% |
+| 0.5 | growth | debit verticals and stock-replacement calls/puts with the trend | 0.75% |
+| 1.0 | speculation | OTM long calls/puts and wide debit verticals, convex payoff | 0.25% |
+
+Points between anchors blend every parameter and search both menus. `--objective auto`
+reads the situation (ATM IV vs 20-day realized vol, SMA/momentum trend) and sets the dial,
+or refuses with "no structural edge". Every candidate carries its POP at market IV,
+breakevens, payoff multiple, and a realized-vol model edge, all closed-form and
+deterministic. Details: `docs/14-objective-options.md`.
+
+```bash
+python scripts/scan_objective_options.py --objective auto --max-aggression 0.5
+python scripts/scan_objective_options.py --aggression 0.8 --bias bullish --symbols QQQ
+```
+
 ## Quickstart
 
 ```bash
@@ -76,7 +98,7 @@ For the options scanner, configure local/profile environment variables from
 `.env.example`, especially `TRADIER_API_TOKEN` and `TRADIER_ACCOUNT_ID`. Never
 commit their values.
 
-One manual scan:
+One manual V1 (credit-only) scan:
 
 ```bash
 python scripts/scan_tradier_options.py \
@@ -115,6 +137,7 @@ examples/                       historical template examples
 - `docs/11-v1-roadmap.md` — current project state and graduation path.
 - `docs/12-v1-architecture-decisions.md` — durable ADR-style decisions.
 - `docs/13-tradier-paper-runbook.md` — local integration and paper operation.
+- `docs/14-objective-options.md` — objective curve, situation model, gates and ranking.
 
 ## model-trader relationship
 

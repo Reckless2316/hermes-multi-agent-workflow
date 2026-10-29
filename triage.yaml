@@ -8,10 +8,14 @@ sources:
     skill: triage-scout-options
     schedule: "10,40 13-20 * * 1-5"
     query: |
-      Run scripts/scan_tradier_options.py with strategy/tasty_defined_risk_v1.yaml.
-      The deterministic scanner is source of truth for strikes, prices, Greeks,
-      max loss, BPR, size, status, and exact OCC legs. Never invent IV Rank.
-      Zero candidates is valid. Market/news context is researched downstream.
+      Run scripts/scan_objective_options.py with strategy/objective_options_v1.yaml,
+      --objective ${OPTIONS_OBJECTIVE:-auto} and --max-aggression
+      ${OPTIONS_MAX_AGGRESSION:-1.0}. The dial runs income (0) -> growth (0.5)
+      -> speculation (1); auto sets it from measured IV/RV and trend. The
+      deterministic scanner is source of truth for objective, structure, strikes,
+      prices, Greeks, POP, breakevens, max loss, BPR, size, status, and exact OCC
+      legs. Never invent IV Rank. Zero candidates and "no structural edge" are
+      valid outcomes. Market/news context is researched downstream.
   - id: swing
     profile: swing_scout
     skill: triage-scout-swing
@@ -20,14 +24,14 @@ sources:
       Scout liquid swing setups using model-trader-style pass/fail gates:
       DATA_OK -> HTF_BIAS -> LTF_FVG -> CISD_CONFIRM -> LEVELS. Report TAKE/WAIT only.
 item_schema:
-  fields: [title, claim, sources, why_it_may_matter, candidate_id, symbol, style, direction, setup_status, timeframe, entry, stop, target, gates_passed, reason, structure, expiration, strikes, width, credit, natural_credit, mid_credit_mark, max_profit, max_loss, buying_power_reduction, capital_efficiency, premium_to_bpr, short_delta, mid_iv, iv_rank, contracts, total_max_loss, total_buying_power_reduction, profit_target_pct, manage_at_dte, strategy_version, risk_r, catalyst]
+  fields: [title, claim, sources, why_it_may_matter, candidate_id, symbol, style, direction, setup_status, timeframe, entry, stop, target, gates_passed, reason, structure, expiration, strikes, width, credit, natural_credit, mid_credit_mark, max_profit, max_loss, buying_power_reduction, capital_efficiency, premium_to_bpr, short_delta, mid_iv, iv_rank, contracts, total_max_loss, total_buying_power_reduction, profit_target_pct, manage_at_dte, strategy_version, risk_r, catalyst, objective, aggression, objective_source, bias, payoff_multiple, pop_at_iv, breakevens, expected_move, model_edge_rv, vol_regime, trend]
 dedup: {method: token-cosine, duplicate_threshold: 0.62, possible_threshold: 0.40}
 rubric:
   threshold: 70
   dimensions:
     - {key: setup_clarity, max: 25, hint: "exact deterministic gates/legs; no vibes"}
-    - {key: risk_reward, max: 20, hint: "defined max loss, verified BPR, capital efficiency and size"}
-    - {key: gate_completeness, max: 25, hint: "options: Tradier snapshot/liquidity/DTE/delta/width/credit/sizing; swing: DATA/HTF/LTF/CISD/LEVELS"}
+    - {key: risk_reward, max: 20, hint: "defined max loss, verified BPR, capital efficiency/payoff multiple and size fitting the stated objective"}
+    - {key: gate_completeness, max: 25, hint: "options: Tradier snapshot/liquidity/DTE/delta/width/premium/sizing plus objective gates (POP/payoff/breakeven reach); swing: DATA/HTF/LTF/CISD/LEVELS"}
     - {key: market_context, max: 15, hint: "earnings, macro, material news; never fabricate IV Rank"}
     - {key: uniqueness, max: 15, hint: "not duplicate/open or recently invalidated"}
 research_lanes:

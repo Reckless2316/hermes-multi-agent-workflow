@@ -18,6 +18,26 @@ class StrategyKind(str, Enum):
     SHORT_PUT_VERTICAL = "short_put_vertical"
     SHORT_CALL_VERTICAL = "short_call_vertical"
     IRON_CONDOR = "iron_condor"
+    LONG_CALL_VERTICAL = "long_call_vertical"
+    LONG_PUT_VERTICAL = "long_put_vertical"
+    LONG_CALL = "long_call"
+    LONG_PUT = "long_put"
+
+
+CREDIT_STRATEGIES = frozenset(
+    {StrategyKind.SHORT_PUT_VERTICAL, StrategyKind.SHORT_CALL_VERTICAL, StrategyKind.IRON_CONDOR}
+)
+DEBIT_VERTICAL_STRATEGIES = frozenset({StrategyKind.LONG_CALL_VERTICAL, StrategyKind.LONG_PUT_VERTICAL})
+LONG_OPTION_STRATEGIES = frozenset({StrategyKind.LONG_CALL, StrategyKind.LONG_PUT})
+DEBIT_STRATEGIES = DEBIT_VERTICAL_STRATEGIES | LONG_OPTION_STRATEGIES
+
+
+class Objective(str, Enum):
+    """Anchor points on the aggression curve (0 = income, 1 = speculation)."""
+
+    INCOME = "income"
+    GROWTH = "growth"
+    SPECULATION = "speculation"
 
 
 @dataclass(frozen=True)
@@ -93,9 +113,11 @@ class SpreadCandidate:
     direction: str
     legs: list[OptionLeg]
     width: float
+    # Signed net premium per share: positive = credit received, negative = debit paid.
     net_credit: float
     mark_credit: float
-    max_profit: float
+    # None means unbounded (long calls only).
+    max_profit: float | None
     max_loss: float
     buying_power_reduction: float
     profit_target_pct: float
@@ -104,13 +126,25 @@ class SpreadCandidate:
     short_delta: float | None
     mid_iv: float | None
     capital_efficiency: float
-    premium_to_bpr: float
+    # max_profit / max_loss; None when max_profit is unbounded.
+    premium_to_bpr: float | None
     status: SetupStatus = SetupStatus.TAKE
     gates: list[GateCheck] = field(default_factory=list)
     reason: str = "All deterministic gates passed"
     source: str = "tradier"
     strategy_version: str = "tasty_defined_risk_v1"
     captured_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    objective: str | None = None
+    # Deterministic objective-engine evidence: POP, breakevens, situation, profile, score.
+    analytics: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def is_debit(self) -> bool:
+        return self.strategy in DEBIT_STRATEGIES
+
+    @property
+    def net_debit(self) -> float:
+        return -self.net_credit
 
     @property
     def gates_passed(self) -> list[str]:
@@ -149,6 +183,8 @@ class SpreadCandidate:
             "source": self.source,
             "strategy_version": self.strategy_version,
             "captured_at": self.captured_at,
+            "objective": self.objective,
+            "analytics": self.analytics,
         }
 
 
@@ -186,7 +222,7 @@ class PositionState:
     entry_credit: float
     width: float
     quantity: int
-    max_profit: float
+    max_profit: float | None
     max_loss: float
     profit_target_pct: float
     manage_at_dte: int
@@ -198,6 +234,7 @@ class ManagementAction(str, Enum):
     CLOSE_AT_MANAGEMENT_DTE = "CLOSE_AT_MANAGEMENT_DTE"
     REVIEW_AT_MANAGEMENT_DTE = "REVIEW_AT_MANAGEMENT_DTE"
     REVIEW_ROLL_FOR_CREDIT = "REVIEW_ROLL_FOR_CREDIT"
+    CLOSE_STOP_LOSS = "CLOSE_STOP_LOSS"
     CLOSE_BEFORE_EXPIRATION = "CLOSE_BEFORE_EXPIRATION"
 
 
@@ -223,7 +260,7 @@ def spread_candidate_from_dict(data: dict[str, Any]) -> SpreadCandidate:
         width=float(data["width"]),
         net_credit=float(data["net_credit"]),
         mark_credit=float(data.get("mark_credit", data["net_credit"])),
-        max_profit=float(data["max_profit"]),
+        max_profit=None if data.get("max_profit") is None else float(data["max_profit"]),
         max_loss=float(data["max_loss"]),
         buying_power_reduction=float(data["buying_power_reduction"]),
         profit_target_pct=float(data["profit_target_pct"]),
@@ -232,13 +269,15 @@ def spread_candidate_from_dict(data: dict[str, Any]) -> SpreadCandidate:
         short_delta=None if data.get("short_delta") is None else float(data["short_delta"]),
         mid_iv=None if data.get("mid_iv") is None else float(data["mid_iv"]),
         capital_efficiency=float(data["capital_efficiency"]),
-        premium_to_bpr=float(data["premium_to_bpr"]),
+        premium_to_bpr=None if data.get("premium_to_bpr") is None else float(data["premium_to_bpr"]),
         status=SetupStatus(str(data.get("status", "TAKE"))),
         gates=gates,
         reason=str(data.get("reason", "All deterministic gates passed")),
         source=str(data.get("source", "tradier")),
         strategy_version=str(data.get("strategy_version", "tasty_defined_risk_v1")),
         captured_at=str(data.get("captured_at") or datetime.now(timezone.utc).isoformat()),
+        objective=None if data.get("objective") is None else str(data["objective"]),
+        analytics=dict(data.get("analytics") or {}),
     )
 
 
